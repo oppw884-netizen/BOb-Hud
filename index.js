@@ -30,6 +30,8 @@ const commands = [
 
 client.once(Events.ClientReady, async (c) => {
   const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+  // ล้างคำสั่งเก่าที่ค้างอยู่แบบ global (เช่นจากแม่แบบเดิม) แล้วลงทะเบียนเฉพาะคำสั่งของเรา
+  await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
   await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
   console.log(`พร้อมใช้งานแล้ว: ${c.user.tag}`);
 });
