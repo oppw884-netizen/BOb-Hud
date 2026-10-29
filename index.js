@@ -162,7 +162,9 @@ client.on(Events.InteractionCreate, async (i) => {
       const res = await fetch(`https://users.roblox.com/v1/users/${robloxId}`).then((r) => r.json());
       const rName = res.name;
 
-      const nick = cfg.nicknameFormat.replace('{username}', rName).slice(0, 32);
+      const special = (cfg.nicknameByRole || []).find((r) => member.roles.cache.has(r.roleId));
+      const format = special ? special.format : cfg.nicknameFormat;
+      const nick = format.replace('{username}', rName).slice(0, 32);
       let nickOk = true;
       await member.setNickname(nick).catch(() => { nickOk = false; });
 
