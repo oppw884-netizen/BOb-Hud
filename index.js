@@ -19,9 +19,28 @@ function saveData(d) {
   try { fs.writeFileSync(DATA_FILE, JSON.stringify(d, null, 2)); } catch (e) { console.error('บันทึก data.json ไม่ได้', e); }
 }
 
+// เลขคำขอ (#1, #2, ...) เก็บต่อเนื่องใน data.json
+function nextRequestNo() {
+  const d = loadData();
+  d.counter = (d.counter || 0) + 1;
+  saveData(d);
+  return d.counter;
+}
+
+// รูปตัวละคร Roblox (ครึ่งตัว) สำหรับการ์ดประกาศผล
+async function getRobloxAvatar(robloxId) {
+  try {
+    const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-bust?userIds=${robloxId}&size=150x150&format=Png`);
+    if (!res.ok) return null;
+    const item = (await res.json()).data?.[0];
+    return item?.state === 'Completed' ? item.imageUrl : null;
+  } catch { return null; }
+}
+
 // สร้างชื่อเล่นตาม role ของสมาชิก
 function buildNick(member, robloxName) {
-  const special = (cfg.nicknameByRole || []).find((r) => member.roles.cache.has(r.roleId));
+  const list = Array.isArray(cfg.nicknameByRole) ? cfg.nicknameByRole : (cfg.nicknameByRole ? [cfg.nicknameByRole] : []);
+  const special = list.find((r) => member.roles.cache.has(r.roleId));
   const format = special ? special.format : cfg.nicknameFormat;
   return format.replace('{username}', robloxName).slice(0, 32);
 }
@@ -57,6 +76,10 @@ const commands = [
   new SlashCommandBuilder()
     .setName('setup-rank-panel')
     .setDescription('ส่งแผงอัพเดทยศในห้องนี้')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  new SlashCommandBuilder()
+    .setName('announce-update')
+    .setDescription('ประกาศอัพเดทเวอร์ชันใหม่ของเกม')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
     .setName('setup-ticket-panel')
@@ -171,6 +194,50 @@ client.on(Events.InteractionCreate, async (i) => {
       return i.reply({ content: 'ส่งแผงเรียบร้อย ✅', flags: MessageFlags.Ephemeral });
     }
 
+    // /announce-update -> เปิดฟอร์มประกาศอัพเดท
+    if (i.isChatInputCommand() && i.commandName === 'announce-update') {
+      const version = new TextInputBuilder()
+        .setCustomId('version').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30)
+        .setValue(cfg.currentVersion || '');
+      const details = new TextInputBuilder()
+        .setCustomId('details').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(3500);
+      return i.showModal(
+        new ModalBuilder()
+          .setCustomId('update_form')
+          .setTitle('ประกาศอัพเดท')
+          .addLabelComponents(
+            new LabelBuilder().setLabel('เวอร์ชัน').setDescription('เช่น V0.1.67').setTextInputComponent(version),
+            new LabelBuilder().setLabel('รายละเอียดอัพเดท').setDescription('พิมพ์ทีละบรรทัด 1 บรรทัด = 1 ข้อ').setTextInputComponent(details),
+          ),
+      );
+    }
+
+    // ส่งฟอร์มประกาศอัพเดท
+    if (i.isModalSubmit() && i.customId === 'update_form') {
+      await i.deferReply({ flags: MessageFlags.Ephemeral });
+      const version = i.fields.getTextInputValue('version').trim();
+      const lines = i.fields.getTextInputValue('details').split('\n').map((l) => l.trim()).filter(Boolean)
+        .map((l) => (/^[•\-\*\+]/.test(l) ? '• ' + l.replace(/^[•\-\*\+]\s*/, '') : '• ' + l));
+
+      const embed = new EmbedBuilder()
+        .setColor(cfg.color)
+        .setTitle(`🆕 อัพเดท ${version}`)
+        .setDescription(lines.join('\n').slice(0, 4000))
+        .setFooter({ text: i.guild.name, iconURL: i.guild.iconURL() || undefined })
+        .setTimestamp();
+      const row = cfg.gameUrl
+        ? new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('เข้าเกม').setStyle(ButtonStyle.Link).setURL(cfg.gameUrl))
+        : null;
+
+      const ch = cfg.updateChannelId ? await client.channels.fetch(cfg.updateChannelId) : i.channel;
+      await ch.send({
+        content: cfg.updatePingRoleId ? `<@&${cfg.updatePingRoleId}>` : undefined,
+        embeds: [embed],
+        components: row ? [row] : [],
+      });
+      return i.editReply(`✅ ประกาศอัพเดท ${version} แล้วที่ ${ch}`);
+    }
+
     // /setup-ticket-panel
     if (i.isChatInputCommand() && i.commandName === 'setup-ticket-panel') {
       const embed = new EmbedBuilder()
@@ -245,9 +312,10 @@ client.on(Events.InteractionCreate, async (i) => {
       const rUser = await getRobloxUser(name);
       if (!rUser) return i.editReply('❌ ไม่พบชื่อผู้ใช้ Roblox นี้ ตรวจสอบตัวสะกดอีกครั้ง');
 
+      const reqNo = nextRequestNo();
       const embed = new EmbedBuilder()
         .setColor(cfg.color)
-        .setTitle('📝 คำขออัพเดทยศ')
+        .setTitle(`📝 คำขอ #${reqNo}`)
         .addFields(
           { name: 'ผู้ขอ', value: `<@${i.user.id}>`, inline: true },
           { name: 'Roblox', value: `[${rUser.name}](https://www.roblox.com/users/${rUser.id}/profile)`, inline: true },
@@ -257,7 +325,7 @@ client.on(Events.InteractionCreate, async (i) => {
 
       const extra = files.slice(1).map((f) => f.url).join('\n');
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`ok|${i.user.id}|${rUser.id}`).setLabel('อนุมัติ').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`ok|${i.user.id}|${rUser.id}|${reqNo}`).setLabel('อนุมัติ').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`no|${i.user.id}`).setLabel('ปฏิเสธ').setStyle(ButtonStyle.Danger),
       );
 
@@ -273,7 +341,7 @@ client.on(Events.InteractionCreate, async (i) => {
       if (!isReviewer(i.member)) {
         return i.reply({ content: 'คุณไม่มีสิทธิ์ตรวจสอบ', flags: MessageFlags.Ephemeral });
       }
-      const [action, discordId, robloxId] = i.customId.split('|');
+      const [action, discordId, robloxId, reqNo] = i.customId.split('|');
       await i.deferUpdate();
       const member = await i.guild.members.fetch(discordId).catch(() => null);
       const finish = async (text) => {
@@ -305,10 +373,33 @@ client.on(Events.InteractionCreate, async (i) => {
 
       const nick = buildNick(member, rName);
       let nickOk = true;
-      await member.setNickname(nick).catch(() => { nickOk = false; });
+      let nickWhy = '';
+      await member.setNickname(nick).catch((e) => {
+        nickOk = false;
+        console.error('เปลี่ยนชื่อเล่นไม่ได้:', e.code, e.message);
+        if (member.id === i.guild.ownerId) nickWhy = 'เป็นเจ้าของเซิร์ฟเวอร์ บอทเปลี่ยนชื่อให้ไม่ได้';
+        else if (e.code === 50013) nickWhy = 'role บอทต่ำกว่า role ของคนนี้ หรือบอทไม่มีสิทธิ์ Manage Nicknames';
+        else nickWhy = `error ${e.code || ''}`;
+      });
 
-      await dm(`✅ คำขออัพเดทของคุณได้รับการอนุมัติแล้ว!\nชื่อ: **${nick}**`);
-      return finish(nickOk ? 'อนุมัติ' : 'อนุมัติ (เปลี่ยนชื่อไม่ได้ ต้องเปลี่ยนเอง)');
+      // การ์ดประกาศผล
+      const avatar = await getRobloxAvatar(robloxId);
+      const result = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle('✅ อัพเดทเรียบร้อย')
+        .setDescription(`คำขอ **${reqNo ? '#' + reqNo : ''}** ได้รับการอนุมัติแล้ว ยินดีด้วย 🎉`)
+        .addFields({ name: '🏷️ ชื่อใหม่', value: `\`${nick}\``, inline: true })
+        .setFooter({ text: i.guild.name, iconURL: i.guild.iconURL() || undefined })
+        .setTimestamp();
+      if (avatar) result.setThumbnail(avatar);
+
+      // ส่งการ์ดประกาศผลทาง DM
+      const dmOk = await member.send({ embeds: [result] }).then(() => true).catch(() => false);
+
+      const notes = [];
+      if (!nickOk) notes.push(`เปลี่ยนชื่อไม่ได้: ${nickWhy}`);
+      if (!dmOk) notes.push('ส่ง DM ไม่ได้ (ผู้ใช้ปิด DM)');
+      return finish(notes.length ? `อนุมัติ (${notes.join(', ')})` : 'อนุมัติ');
     }
   } catch (err) {
     console.error(err);
