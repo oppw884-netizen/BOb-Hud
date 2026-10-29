@@ -113,17 +113,10 @@ client.once(Events.ClientReady, async (c) => {
   }
 });
 
-// ---------- สมาชิกใหม่เข้าเซิร์ฟเวอร์ ----------
+// ---------- สมาชิกใหม่เข้าเซิร์ฟเวอร์: ให้ role "ยังไม่ยืนยัน" (ถ้าตั้งไว้) ----------
 client.on(Events.GuildMemberAdd, async (member) => {
   if (member.guild.id !== process.env.GUILD_ID) return;
   if (cfg.unverifiedRoleId) await member.roles.add(cfg.unverifiedRoleId).catch(() => {});
-  if (cfg.welcomeChannelId) {
-    const ch = await client.channels.fetch(cfg.welcomeChannelId).catch(() => null);
-    if (ch) {
-      const where = cfg.verifyChannelId ? ` ไปที่ <#${cfg.verifyChannelId}> แล้ว` : ' ';
-      ch.send(`👋 ยินดีต้อนรับ <@${member.id}>!${where}กดปุ่ม **กรอกข้อมูล** เพื่อยืนยันตัวตนด้วยชื่อ Roblox`).catch(() => {});
-    }
-  }
 });
 
 // ---------- Panel ----------
