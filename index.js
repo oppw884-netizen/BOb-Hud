@@ -32,7 +32,16 @@ client.once(Events.ClientReady, async (c) => {
   const rest = new REST().setToken(process.env.DISCORD_TOKEN);
   // ล้างคำสั่งเก่าที่ค้างอยู่แบบ global (เช่นจากแม่แบบเดิม) แล้วลงทะเบียนเฉพาะคำสั่งของเรา
   await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
-  await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
+  try {
+    await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
+  } catch (err) {
+    if (err.code === 50001) {
+      console.error('❌ Missing Access: บอทยังไม่ได้อยู่ในเซิร์ฟเวอร์ GUILD_ID นี้ หรือเชิญโดยไม่มี scope applications.commands\n' +
+        '   → เชิญบอทใหม่ด้วยลิงก์ที่ติ๊ก bot + applications.commands และตรวจว่า GUILD_ID ถูกเซิร์ฟเวอร์');
+    } else {
+      console.error(err);
+    }
+  }
   console.log(`พร้อมใช้งานแล้ว: ${c.user.tag}`);
 });
 
