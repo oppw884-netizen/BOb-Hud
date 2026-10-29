@@ -1,15 +1,14 @@
 // ===== แก้ไขค่าต่าง ๆ ตรงนี้ =====
 module.exports = {
   // ลิงก์เข้าเกม (ปุ่ม "เข้าเกม")
-  gameUrl: 'https://www.roblox.com/games/0000000000',
+  gameUrl: 'https://www.roblox.com/games/0000000000', // <-- ใส่ลิงก์เกมจริง
 
   // ห้องที่ผู้ตรวจสอบจะเห็นคำขอ
-  reviewChannelId: '000000000000000000',
+  reviewChannelId: '1562615827633541120', // <-- ใส่ไอดีห้องตรวจสอบ
 
   // role ของผู้ตรวจสอบที่กดอนุมัติได้
-  reviewerRoleIds: ['000000000000000000'],
+  reviewerRoleIds: ['1562055574676578306', '1562330404604612649'],
 
-  // แปลงรูปแบบชื่อเล่นที่จะตั้งให้
   // ตัวแปร: {username} = ชื่อผู้ใช้ Roblox (ชื่อในเกม)
   // รูปแบบชื่อของคนธรรมดา (ใช้เมื่อไม่มี role พิเศษด้านล่าง)
   nicknameFormat: 'Player | {username}',
@@ -18,7 +17,7 @@ module.exports = {
   // ถ้าสมาชิกมีหลาย role จะใช้อันแรกที่ตรง
   nicknameByRole: [
     { roleId: '1562055574676578306', format: 'Owner | {username}' }, // role เจ้าของ
-    { roleId: '1562330404604612649', format: 'Dev | {username}' },     // role Dev
+    { roleId: '1562330404604612649', format: 'Dev | {username}' },   // role Dev
   ],
 
   color: 0xc9a227,
