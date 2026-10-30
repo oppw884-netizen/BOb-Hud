@@ -135,6 +135,11 @@ client.once(Events.ClientReady, async (c) => {
   }
   console.log(`พร้อมใช้งานแล้ว: ${c.user.tag}`);
 
+  // แจ้งสถานะบอทแชท AI
+  if (!cfg.aiChannelId) console.log('[AI] ปิดอยู่: ยังไม่ได้ใส่ aiChannelId ใน config.js');
+  else if (!process.env.XAI_API_KEY) console.log('[AI] ปิดอยู่: ยังไม่ได้ตั้ง XAI_API_KEY ใน Environment');
+  else console.log(`[AI] เปิดอยู่: ห้อง ${cfg.aiChannelId} โมเดล ${cfg.aiModel || 'grok-4.3'}`);
+
   // เริ่มซิงก์ชื่ออัตโนมัติ
   const mins = cfg.syncIntervalMinutes || 0;
   if (mins > 0) {
@@ -428,33 +433,39 @@ async function askAI(history) {
     'ข้อความผู้ใช้จะขึ้นต้นด้วย "ชื่อ: " เพื่อบอกว่าใครพูด ห้ามขึ้นต้นคำตอบด้วยชื่อตัวเอง ' +
     'ถ้ามีคนถามว่าเป็นคนหรือบอท ให้ตอบตรง ๆ ว่าเป็นบอท AI ห้ามอ้างว่าเป็นคนจริง ๆ';
 
-  // รวมข้อความ role เดียวกันที่ติดกัน (Gemini ชอบสลับ user/model)
-  const contents = [];
+  // รวมข้อความ role เดียวกันที่ติดกัน (user = คนในห้อง, assistant = บอท)
+  const messages = [{ role: 'system', content: persona }];
   for (const h of history) {
-    const last = contents[contents.length - 1];
-    if (last && last.role === h.role) last.parts[0].text += '\n' + h.text;
-    else contents.push({ role: h.role, parts: [{ text: h.text }] });
+    const role = h.role === 'model' ? 'assistant' : 'user';
+    const last = messages[messages.length - 1];
+    if (last.role === role) last.content += '\n' + h.text;
+    else messages.push({ role, content: h.text });
   }
 
-  const model = cfg.aiModel || 'gemini-2.5-flash';
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const res = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.XAI_API_KEY}` },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: persona }] },
-      contents,
-      generationConfig: { maxOutputTokens: 300, temperature: 1 },
+      model: cfg.aiModel || 'grok-4.3',
+      messages,
+      max_tokens: 300,
+      temperature: 1,
     }),
   });
   if (!res.ok) throw new Error(`AI API ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const json = await res.json();
-  return json.candidates?.[0]?.content?.parts?.map((p) => p.text).join('').trim() || '';
+  return json.choices?.[0]?.message?.content?.trim() || '';
 }
 
 client.on(Events.MessageCreate, async (msg) => {
   try {
-    if (!cfg.aiChannelId || !process.env.GEMINI_API_KEY) return; // ปิดอยู่ถ้ายังไม่ตั้งค่า
-    if (msg.author.bot || msg.channelId !== cfg.aiChannelId || !msg.content.trim()) return;
+    if (!cfg.aiChannelId || !process.env.XAI_API_KEY) return; // ปิดอยู่ถ้ายังไม่ตั้งค่า
+    if (msg.author.bot || msg.channelId !== cfg.aiChannelId) return;
+    if (!msg.content.trim()) {
+      console.log('[AI] ได้ข้อความแต่เนื้อหาว่าง: น่าจะยังไม่ได้เปิด Message Content Intent ใน Developer Portal (หรือเป็นข้อความที่ไม่มีตัวอักษร)');
+      return;
+    }
+    console.log(`[AI] ได้ข้อความจาก ${msg.author.username}: กำลังถาม Grok...`);
 
     const now = Date.now();
     if (now - (aiCooldown.get(msg.author.id) || 0) < 3000) return; // กันสแปม 3 วินาที
