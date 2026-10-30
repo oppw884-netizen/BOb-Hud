@@ -8,7 +8,14 @@ const fs = require('fs');
 const path = require('path');
 const cfg = require('./config');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent, // ต้องเปิด Message Content Intent ใน Developer Portal ด้วย
+  ],
+});
 
 // ---------- เก็บข้อมูลผูกบัญชี (Discord ↔ Roblox) ลงไฟล์ ----------
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -74,15 +81,15 @@ async function getRobloxUsersByIds(ids) {
 // ---------- Commands ----------
 const commands = [
   new SlashCommandBuilder()
-    .setName('setup-rank-panel')
+    .setName('setuprankpanel')
     .setDescription('ส่งแผงอัพเดทยศในห้องนี้')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
-    .setName('announce-update')
+    .setName('announceupdate')
     .setDescription('ประกาศอัพเดทเวอร์ชันใหม่ของเกม')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
-    .setName('setup-ticket-panel')
+    .setName('setupticketpanel')
     .setDescription('ส่งแผงติดต่อแอดมิน (ตั๋ว) ในห้องนี้')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ].map((c) => c.toJSON());
@@ -188,14 +195,14 @@ const pending = new Set(); // กันส่งซ้ำ
 
 client.on(Events.InteractionCreate, async (i) => {
   try {
-    // /setup-rank-panel
-    if (i.isChatInputCommand() && i.commandName === 'setup-rank-panel') {
+    // /setuprankpanel
+    if (i.isChatInputCommand() && i.commandName === 'setuprankpanel') {
       await i.channel.send(panelPayload());
       return i.reply({ content: 'ส่งแผงเรียบร้อย ✅', flags: MessageFlags.Ephemeral });
     }
 
-    // /announce-update -> เปิดฟอร์มประกาศอัพเดท
-    if (i.isChatInputCommand() && i.commandName === 'announce-update') {
+    // /announceupdate -> เปิดฟอร์มประกาศอัพเดท
+    if (i.isChatInputCommand() && i.commandName === 'announceupdate') {
       const version = new TextInputBuilder()
         .setCustomId('version').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30)
         .setValue(cfg.currentVersion || '');
@@ -238,8 +245,8 @@ client.on(Events.InteractionCreate, async (i) => {
       return i.editReply(`✅ ประกาศอัพเดท ${version} แล้วที่ ${ch}`);
     }
 
-    // /setup-ticket-panel
-    if (i.isChatInputCommand() && i.commandName === 'setup-ticket-panel') {
+    // /setupticketpanel
+    if (i.isChatInputCommand() && i.commandName === 'setupticketpanel') {
       const embed = new EmbedBuilder()
         .setColor(cfg.color)
         .setTitle('🎫 ติดต่อแอดมิน')
@@ -406,6 +413,67 @@ client.on(Events.InteractionCreate, async (i) => {
     const msg = '⚠️ เกิดข้อผิดพลาด ลองใหม่อีกครั้งหรือแจ้งแอดมิน';
     if (i.deferred || i.replied) i.editReply(msg).catch(() => {});
     else i.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
+});
+
+// ---------- บอทแชท AI (บุคลิกตามที่ตั้งใน config.aiPersona) ----------
+const aiHistory = []; // [{role:'user'|'model', text}] ประวัติสั้น ๆ ของห้องแชท
+const aiCooldown = new Map(); // userId -> เวลาที่ส่งล่าสุด
+const AI_KEEP = 12;
+
+async function askAI(history) {
+  const persona =
+    `${cfg.aiPersona}\n\n` +
+    'กฎ: ตอบสั้น เป็นกันเองเหมือนแชทในดิสคอร์ด ไม่เกิน 2-3 ประโยค ' +
+    'ข้อความผู้ใช้จะขึ้นต้นด้วย "ชื่อ: " เพื่อบอกว่าใครพูด ห้ามขึ้นต้นคำตอบด้วยชื่อตัวเอง ' +
+    'ถ้ามีคนถามว่าเป็นคนหรือบอท ให้ตอบตรง ๆ ว่าเป็นบอท AI ห้ามอ้างว่าเป็นคนจริง ๆ';
+
+  // รวมข้อความ role เดียวกันที่ติดกัน (Gemini ชอบสลับ user/model)
+  const contents = [];
+  for (const h of history) {
+    const last = contents[contents.length - 1];
+    if (last && last.role === h.role) last.parts[0].text += '\n' + h.text;
+    else contents.push({ role: h.role, parts: [{ text: h.text }] });
+  }
+
+  const model = cfg.aiModel || 'gemini-2.5-flash';
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: persona }] },
+      contents,
+      generationConfig: { maxOutputTokens: 300, temperature: 1 },
+    }),
+  });
+  if (!res.ok) throw new Error(`AI API ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const json = await res.json();
+  return json.candidates?.[0]?.content?.parts?.map((p) => p.text).join('').trim() || '';
+}
+
+client.on(Events.MessageCreate, async (msg) => {
+  try {
+    if (!cfg.aiChannelId || !process.env.GEMINI_API_KEY) return; // ปิดอยู่ถ้ายังไม่ตั้งค่า
+    if (msg.author.bot || msg.channelId !== cfg.aiChannelId || !msg.content.trim()) return;
+
+    const now = Date.now();
+    if (now - (aiCooldown.get(msg.author.id) || 0) < 3000) return; // กันสแปม 3 วินาที
+    aiCooldown.set(msg.author.id, now);
+
+    const name = msg.member?.displayName || msg.author.username;
+    aiHistory.push({ role: 'user', text: `${name}: ${msg.content.slice(0, 500)}` });
+    while (aiHistory.length > AI_KEEP) aiHistory.shift();
+
+    await msg.channel.sendTyping().catch(() => {});
+    const answer = await askAI(aiHistory);
+    if (!answer) return;
+
+    aiHistory.push({ role: 'model', text: answer });
+    while (aiHistory.length > AI_KEEP) aiHistory.shift();
+
+    await msg.reply({ content: answer.slice(0, 1900), allowedMentions: { parse: [], repliedUser: false } });
+  } catch (err) {
+    console.error('AI chat error:', err.message);
   }
 });
 
