@@ -1,4 +1,4 @@
-require('dotenv').config();
+try { require('dotenv').config(); } catch { /* ไม่มี dotenv ก็ได้ โฮสต์ส่งค่า Environment ให้อยู่แล้ว */ }
 const {
   Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, FileUploadBuilder,
