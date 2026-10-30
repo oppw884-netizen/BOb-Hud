@@ -442,19 +442,38 @@ async function askAI(history) {
     else messages.push({ role, content: h.text });
   }
 
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${(process.env.XAI_API_KEY || '').trim()}`,
+  };
+  const model = cfg.aiModel || 'grok-4.7';
+
+  // 1) Responses API (ตามตัวอย่างในคอนโซล xAI)
+  const r1 = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.XAI_API_KEY}` },
-    body: JSON.stringify({
-      model: cfg.aiModel || 'grok-4.3',
-      messages,
-      max_tokens: 300,
-      temperature: 1,
-    }),
+    headers,
+    body: JSON.stringify({ model, input: messages, max_output_tokens: 300 }),
   });
-  if (!res.ok) throw new Error(`AI API ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const json = await res.json();
-  return json.choices?.[0]?.message?.content?.trim() || '';
+  if (r1.ok) {
+    const j = await r1.json();
+    const text = j.output_text ||
+      (j.output || []).flatMap((o) => o.content || []).filter((c) => c.type === 'output_text').map((c) => c.text).join('');
+    if (text) return text.trim();
+  } else if ([401, 402, 403, 429].includes(r1.status)) {
+    throw new Error(`AI API ${r1.status}: ${(await r1.text()).slice(0, 200)}`);
+  }
+
+  // 2) สำรอง: Chat Completions
+  const r2 = await fetch('https://api.x.ai/v1/chat/completions', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model, messages, max_tokens: 300, temperature: 1 }),
+  });
+  if (!r2.ok) {
+    throw new Error(`AI API ${r2.status}: ${(await r2.text()).slice(0, 200)} (responses: ${r1.status})`);
+  }
+  const j2 = await r2.json();
+  return j2.choices?.[0]?.message?.content?.trim() || '';
 }
 
 client.on(Events.MessageCreate, async (msg) => {
