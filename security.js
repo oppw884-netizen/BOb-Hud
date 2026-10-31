@@ -5,6 +5,8 @@ const { EmbedBuilder, AuditLogEvent, Events, PermissionFlagsBits } = require('di
 // ---------- ค่าเริ่มต้น (ถูกทับด้วย cfg.security ใน config.js) ----------
 const DEFAULTS = {
   enabled: false,
+  debug: false,      // true = log สาเหตุที่ข้ามการตรวจแต่ละข้อความ (ใช้หาว่าทำไมไม่ทำงาน)
+  testMode: false,   // true = ไม่ยกเว้นเจ้าของ/แอดมิน/คนมีสิทธิ์ลบข้อความ ไว้ลองพิมพ์คำหยาบด้วยบัญชีตัวเอง
   logChannelId: '',
   exemptRoleIds: [],
   whitelistUserIds: [],
@@ -134,11 +136,20 @@ function setupSecurity(client, cfg) {
   const exemptRoles = [...(S.exemptRoleIds || []), ...(cfg.reviewerRoleIds || [])];
   const selfDeleted = new Set();
 
-  const isExempt = (m) =>
-    m.user.bot || m.id === m.guild.ownerId || S.whitelistUserIds.includes(m.id) ||
-    m.permissions.has(PermissionFlagsBits.Administrator) ||
-    m.permissions.has(PermissionFlagsBits.ManageMessages) ||
-    exemptRoles.some((id) => m.roles.cache.has(id));
+  const dbg = (...a) => { if (S.debug) console.log('[Security:debug]', ...a); };
+
+  // คืนเหตุผลที่ถูกยกเว้น (หรือ null ถ้าต้องตรวจ)
+  const exemptReason = (m) => {
+    if (m.user.bot) return 'เป็นบอท';
+    if (S.testMode) return null; // โหมดทดสอบ: ตรวจทุกคนที่ไม่ใช่บอท
+    if (m.id === m.guild.ownerId) return 'เป็นเจ้าของเซิร์ฟเวอร์';
+    if (S.whitelistUserIds.includes(m.id)) return 'อยู่ใน whitelistUserIds';
+    if (m.permissions.has(PermissionFlagsBits.Administrator)) return 'มีสิทธิ์ Administrator';
+    if (m.permissions.has(PermissionFlagsBits.ManageMessages)) return 'มีสิทธิ์ Manage Messages';
+    if (exemptRoles.some((id) => m.roles.cache.has(id))) return 'มี role ผู้ตรวจ/exemptRoleIds';
+    return null;
+  };
+  const isExempt = (m) => !!exemptReason(m);
 
   async function send(embed, content, pingId) {
     if (!S.logChannelId) return;
@@ -173,6 +184,8 @@ function setupSecurity(client, cfg) {
     const missing = Object.entries(need).filter(([p]) => !me.permissions.has(PermissionFlagsBits[p])).map(([, d]) => d);
     const aiState = !S.ai.enabled ? 'ปิด' : (process.env.GEMINI_API_KEY ? `เปิด (Gemini ${S.ai.model})` : 'ปิด (ยังไม่ได้ตั้ง GEMINI_API_KEY)');
     console.log(`[Security] เปิดอยู่ log=${S.logChannelId || 'ไม่ได้ตั้ง'} AI=${aiState}`);
+    if (S.testMode) console.log('[Security] ⚠️ testMode เปิดอยู่: เจ้าของ/แอดมินก็ถูกตรวจ ปิดก่อนใช้งานจริง');
+    console.log(`[Security] บอทเห็นเซิร์ฟเวอร์ ${guild.name} (${guild.id}) | Message Content Intent: ${client.options.intents.has('MessageContent') ? 'ขอแล้วในโค้ด' : 'ไม่ได้ขอ'}`);
     if (missing.length) console.log(`[Security] ⚠️ บอทยังขาดสิทธิ์: ${missing.join(', ')}`);
     if (!S.logChannelId) console.log('[Security] ⚠️ ยังไม่ได้ตั้ง security.logChannelId จะไม่มีห้อง log');
   });
@@ -259,11 +272,16 @@ function setupSecurity(client, cfg) {
   }
 
   async function moderate(msg, isEdit) {
-    if (!msg.guild || msg.guild.id !== GUILD_ID) return;
-    if (!msg.author || msg.author.bot || msg.system || msg.channelId === S.logChannelId) return;
+    if (!msg.guild) return;
+    if (msg.guild.id !== GUILD_ID) return dbg(`ข้าม: guild ${msg.guild.id} ไม่ตรงกับ GUILD_ID (${GUILD_ID})`);
+    if (!msg.author || msg.author.bot || msg.system) return;
+    if (msg.channelId === S.logChannelId) return dbg('ข้าม: เป็นห้อง log');
     const member = msg.member || (await msg.guild.members.fetch(msg.author.id).catch(() => null));
-    if (!member || isExempt(member)) return;
+    if (!member) return dbg('ข้าม: ดึงข้อมูลสมาชิกไม่ได้');
+    const why = exemptReason(member);
+    if (why) return dbg(`ข้าม ${msg.author.tag}: ${why} (ตั้ง security.testMode: true เพื่อทดสอบด้วยบัญชีนี้)`);
     const text = msg.content || '';
+    if (!text) dbg(`ข้อความจาก ${msg.author.tag} ไม่มีเนื้อหา — ถ้าพิมพ์ตัวอักษรแล้วยังว่าง แปลว่ายังไม่ได้เปิด Message Content Intent ใน Developer Portal`);
 
     // 1) สแปม (นับเฉพาะข้อความใหม่)
     if (S.spam.enabled && !isEdit) {
@@ -291,6 +309,7 @@ function setupSecurity(client, cfg) {
     // 3) คำหยาบ (รายการคำ)
     if (S.badWords.enabled) {
       const hit = badWordHit(text, S.badWords.words, S.badWords.allow);
+      dbg(`ตรวจคำหยาบ ${msg.author.tag}: ${hit ? 'เจอ "' + hit + '"' : 'ไม่เจอ'}`);
       if (hit) return strike(msg, member, 'ห้ามใช้คำไม่สุภาพ', text);
     }
     // 4) AI
