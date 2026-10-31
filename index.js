@@ -2,7 +2,7 @@ try { require('dotenv').config(); } catch { /* ไม่มี dotenv ก็ไ�
 const {
   Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, FileUploadBuilder,
-  SlashCommandBuilder, REST, Routes, PermissionFlagsBits, MessageFlags, Events, ChannelType,
+  SlashCommandBuilder, REST, Routes, PermissionFlagsBits, MessageFlags, Events, ChannelType, Partials,
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -14,7 +14,9 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, // ต้องเปิด Message Content Intent ใน Developer Portal ด้วย
+    GatewayIntentBits.GuildModeration, // ใช้ดู event แบน/ปลดแบน (ระบบความปลอดภัย)
   ],
+  partials: [Partials.Message, Partials.Channel, Partials.GuildMember], // log ข้อความเก่าที่ไม่อยู่ในแคช
 });
 
 // ---------- เก็บข้อมูลผูกบัญชี (Discord ↔ Roblox) ลงไฟล์ ----------
@@ -138,7 +140,7 @@ client.once(Events.ClientReady, async (c) => {
   // แจ้งสถานะบอทแชท AI
   if (!cfg.aiChannelId) console.log('[AI] ปิดอยู่: ยังไม่ได้ใส่ aiChannelId ใน config.js');
   else if (!process.env.XAI_API_KEY) console.log('[AI] ปิดอยู่: ยังไม่ได้ตั้ง XAI_API_KEY ใน Environment');
-  else console.log(`[AI] เปิดอยู่: ห้อง ${cfg.aiChannelId} โมเดล ${cfg.aiModel || 'grok-4.3'}`);
+  else console.log(`[AI] เปิดอยู่ (Grok): ห้อง ${cfg.aiChannelId} โมเดล ${cfg.aiModel || 'grok-4.7'}`);
 
   // เริ่มซิงก์ชื่ออัตโนมัติ
   const mins = cfg.syncIntervalMinutes || 0;
@@ -506,5 +508,12 @@ client.on(Events.MessageCreate, async (msg) => {
     console.error('AI chat error:', err.message);
   }
 });
+
+// ระบบความปลอดภัยเซิร์ฟเวอร์ (ตั้งค่าที่ cfg.security ใน config.js)
+try {
+  require('./security')(client, cfg);
+} catch (e) {
+  console.error('[Security] เริ่มระบบไม่สำเร็จ:', e.message);
+}
 
 client.login(process.env.DISCORD_TOKEN);
