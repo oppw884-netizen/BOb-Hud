@@ -1,519 +1,257 @@
-try { require('dotenv').config(); } catch { /* ไม่มี dotenv ก็ได้ โฮสต์ส่งค่า Environment ให้อยู่แล้ว */ }
-const {
-  Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, FileUploadBuilder,
-  SlashCommandBuilder, REST, Routes, PermissionFlagsBits, MessageFlags, Events, ChannelType, Partials,
-} = require('discord.js');
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const cfg = require('./config');
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+  MessageFlags,
+} = require('discord.js');
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // ต้องเปิด Message Content Intent ใน Developer Portal ด้วย
-    GatewayIntentBits.GuildModeration, // ใช้ดู event แบน/ปลดแบน (ระบบความปลอดภัย)
-  ],
-  partials: [Partials.Message, Partials.Channel, Partials.GuildMember], // log ข้อความเก่าที่ไม่อยู่ในแคช
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
-// ---------- เก็บข้อมูลผูกบัญชี (Discord ↔ Roblox) ลงไฟล์ ----------
+// ---------- เก็บข้อมูลแผง (ต่อ message id ซึ่งไม่ซ้ำกันทุกเซิร์ฟเวอร์) ----------
 const DATA_FILE = path.join(__dirname, 'data.json');
-function loadData() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch { return { links: {} }; }
-}
-function saveData(d) {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(d, null, 2)); } catch (e) { console.error('บันทึก data.json ไม่ได้', e); }
-}
+let db = {}; // { [messageId]: { guildId, channelId, mode, roles: [roleId] } }
+try {
+  db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+} catch {}
+const save = () => fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
 
-// เลขคำขอ (#1, #2, ...) เก็บต่อเนื่องใน data.json
-function nextRequestNo() {
-  const d = loadData();
-  d.counter = (d.counter || 0) + 1;
-  saveData(d);
-  return d.counter;
-}
+const MAX_ROLES = 25; // ลิมิตของ Select Menu
+const ROLE_SLOTS = 10; // จำนวนช่องยศตอนสร้างแผง (เพิ่มทีหลังได้ด้วย /rolepanel add)
+const DANGEROUS = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageGuild,
+  PermissionFlagsBits.ManageRoles,
+  PermissionFlagsBits.ManageChannels,
+  PermissionFlagsBits.BanMembers,
+  PermissionFlagsBits.KickMembers,
+];
 
-// รูปตัวละคร Roblox (ครึ่งตัว) สำหรับการ์ดประกาศผล
-async function getRobloxAvatar(robloxId) {
-  try {
-    const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-bust?userIds=${robloxId}&size=150x150&format=Png`);
-    if (!res.ok) return null;
-    const item = (await res.json()).data?.[0];
-    return item?.state === 'Completed' ? item.imageUrl : null;
-  } catch { return null; }
-}
-
-// สร้างชื่อเล่นตาม role ของสมาชิก
-function buildNick(member, robloxName) {
-  const list = Array.isArray(cfg.nicknameByRole) ? cfg.nicknameByRole : (cfg.nicknameByRole ? [cfg.nicknameByRole] : []);
-  const special = list.find((r) => member.roles.cache.has(r.roleId));
-  const format = special ? special.format : cfg.nicknameFormat;
-  return format.replace('{username}', robloxName).slice(0, 32);
-}
-
-// ---------- Roblox API ----------
-async function getRobloxUser(username) {
-  const res = await fetch('https://users.roblox.com/v1/usernames/users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ usernames: [username], excludeBannedUsers: true }),
-  });
-  if (!res.ok) throw new Error('Roblox users API error');
-  const data = (await res.json()).data;
-  return data[0] || null; // {id, name, displayName}
-}
-
-async function getRobloxUsersByIds(ids) {
-  const out = [];
-  for (let i = 0; i < ids.length; i += 100) {
-    const res = await fetch('https://users.roblox.com/v1/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userIds: ids.slice(i, i + 100), excludeBannedUsers: false }),
-    });
-    if (!res.ok) throw new Error('Roblox users (ids) API error ' + res.status);
-    out.push(...(await res.json()).data);
-  }
-  return out; // [{id, name, displayName}]
-}
-
-// ---------- Commands ----------
-const commands = [
-  new SlashCommandBuilder()
-    .setName('setuprankpanel')
-    .setDescription('ส่งแผงอัพเดทยศในห้องนี้')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-  new SlashCommandBuilder()
-    .setName('announceupdate')
-    .setDescription('ประกาศอัพเดทเวอร์ชันใหม่ของเกม')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-  new SlashCommandBuilder()
-    .setName('setupticketpanel')
-    .setDescription('ส่งแผงติดต่อแอดมิน (ตั๋ว) ในห้องนี้')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-].map((c) => c.toJSON());
-
-// ---------- ซิงก์ชื่ออัตโนมัติเมื่อเปลี่ยนชื่อ Roblox ----------
-async function syncNames() {
-  const data = loadData();
-  const entries = Object.entries(data.links);
-  if (!entries.length) return;
-  try {
-    const users = await getRobloxUsersByIds([...new Set(entries.map(([, v]) => v.robloxId))]);
-    const byId = new Map(users.map((u) => [String(u.id), u]));
-    const guild = await client.guilds.fetch(process.env.GUILD_ID);
-    let changed = 0;
-    for (const [discordId, link] of entries) {
-      const u = byId.get(String(link.robloxId));
-      if (!u || u.name === link.robloxName) continue;
-      const member = await guild.members.fetch(discordId).catch(() => null);
-      if (!member) continue;
-      await member.setNickname(buildNick(member, u.name)).catch(() => {});
-      link.robloxName = u.name;
-      changed++;
-    }
-    if (changed) { saveData(data); console.log(`ซิงก์ชื่อแล้ว ${changed} คน`); }
-  } catch (e) {
-    console.error('ซิงก์ชื่อไม่สำเร็จ', e.message);
-  }
-}
-
-client.once(Events.ClientReady, async (c) => {
-  const rest = new REST().setToken(process.env.DISCORD_TOKEN);
-  // ล้างคำสั่งเก่าที่ค้างอยู่แบบ global (เช่นจากแม่แบบเดิม) แล้วลงทะเบียนเฉพาะคำสั่งของเรา
-  await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
-  try {
-    await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
-  } catch (err) {
-    if (err.code === 50001) {
-      console.error('❌ Missing Access: บอทยังไม่ได้อยู่ในเซิร์ฟเวอร์ GUILD_ID นี้ หรือเชิญโดยไม่มี scope applications.commands\n' +
-        '   → เชิญบอทใหม่ด้วยลิงก์ที่ติ๊ก bot + applications.commands และตรวจว่า GUILD_ID ถูกเซิร์ฟเวอร์');
-    } else {
-      console.error(err);
-    }
-  }
-  console.log(`พร้อมใช้งานแล้ว: ${c.user.tag}`);
-
-  // แจ้งสถานะบอทแชท AI
-  if (!cfg.aiChannelId) console.log('[AI] ปิดอยู่: ยังไม่ได้ใส่ aiChannelId ใน config.js');
-  else if (!process.env.XAI_API_KEY) console.log('[AI] ปิดอยู่: ยังไม่ได้ตั้ง XAI_API_KEY ใน Environment');
-  else console.log(`[AI] เปิดอยู่ (Grok): ห้อง ${cfg.aiChannelId} โมเดล ${cfg.aiModel || 'grok-4.7'}`);
-
-  // เริ่มซิงก์ชื่ออัตโนมัติ
-  const mins = cfg.syncIntervalMinutes || 0;
-  if (mins > 0) {
-    setTimeout(syncNames, 60 * 1000);
-    setInterval(syncNames, mins * 60 * 1000);
-  }
+const ephemeral = (content, extra = {}) => ({
+  content,
+  flags: MessageFlags.Ephemeral,
+  allowedMentions: { parse: [] },
+  ...extra,
 });
 
-// ---------- สมาชิกใหม่เข้าเซิร์ฟเวอร์: ให้ role "ยังไม่ยืนยัน" (ถ้าตั้งไว้) ----------
-client.on(Events.GuildMemberAdd, async (member) => {
-  if (member.guild.id !== process.env.GUILD_ID) return;
-  if (cfg.unverifiedRoleId) await member.roles.add(cfg.unverifiedRoleId).catch(() => {});
+// ---------- คำสั่ง ----------
+const cmd = new SlashCommandBuilder()
+  .setName('rolepanel')
+  .setDescription('จัดการแผงรับยศ')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+  .setDMPermission(false)
+  .addSubcommand((s) => {
+    s.setName('create')
+      .setDescription('สร้างแผงรับยศในห้องนี้')
+      .addStringOption((o) => o.setName('title').setDescription('หัวข้อแผง').setRequired(true))
+      .addRoleOption((o) => o.setName('role1').setDescription('ยศที่ 1').setRequired(true))
+      .addStringOption((o) => o.setName('description').setDescription('คำอธิบาย (ขึ้นบรรทัดใหม่ด้วย \\n)'))
+      .addStringOption((o) => o.setName('image_url').setDescription('ลิงก์รูปแบนเนอร์'))
+      .addStringOption((o) =>
+        o
+          .setName('mode')
+          .setDescription('single = เลือกได้ 1 ยศ, multiple = เลือกได้หลายยศ')
+          .addChoices({ name: 'เลือกได้ 1 ยศ', value: 'single' }, { name: 'เลือกได้หลายยศ', value: 'multiple' })
+      );
+    for (let n = 2; n <= ROLE_SLOTS; n++) {
+      s.addRoleOption((o) => o.setName(`role${n}`).setDescription(`ยศที่ ${n}`));
+    }
+    return s;
+  })
+  .addSubcommand((s) =>
+    s
+      .setName('add')
+      .setDescription('เพิ่มยศเข้าแผงที่มีอยู่')
+      .addStringOption((o) => o.setName('message_id').setDescription('ID ข้อความของแผง').setRequired(true))
+      .addRoleOption((o) => o.setName('role').setDescription('ยศที่จะเพิ่ม').setRequired(true))
+  )
+  .addSubcommand((s) =>
+    s
+      .setName('remove')
+      .setDescription('เอายศออกจากแผง')
+      .addStringOption((o) => o.setName('message_id').setDescription('ID ข้อความของแผง').setRequired(true))
+      .addRoleOption((o) => o.setName('role').setDescription('ยศที่จะเอาออก').setRequired(true))
+  )
+  .toJSON();
+
+client.once('clientReady', async () => {
+  await client.application.commands.set([cmd]); // global = ใช้ได้ทุกเซิร์ฟเวอร์
+  console.log(`✅ ออนไลน์ในชื่อ ${client.user.tag} | อยู่ ${client.guilds.cache.size} เซิร์ฟเวอร์`);
 });
 
-// ---------- Panel ----------
-function panelPayload() {
-  const embed = new EmbedBuilder()
-    .setColor(cfg.color)
-    .setTitle('✅ ยืนยันตัวตน')
-    .setDescription(
-      'กดปุ่มด้านล่างเพื่อส่งข้อมูลให้ผู้ตรวจสอบยืนยัน\n\n' +
-      '1. กด 📝 **กรอกข้อมูลยืนยันตัวตน**\n' +
-      '2. ใส่ **ชื่อผู้ใช้ Roblox** (ชื่อหลัง @ ไม่ใช่ชื่อที่แสดง)\n' +
-      '3. แนบ **รูปในเกม** ที่เห็นชื่อบนหัวชัด ๆ (ได้สูงสุด 10 รูป)\n' +
-      '4. รอผู้ตรวจสอบกดยืนยัน บอทจะเปลี่ยนชื่อให้เอง แล้วแจ้งผลทาง DM\n\n' +
-      'ถ้าเปลี่ยนชื่อ Roblox ภายหลัง บอทจะอัพเดทชื่อให้อัตโนมัติ'
-    )
-    .setFooter({ text: 'ส่งคำขอได้ทีละ 1 อัน' });
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('open_form').setLabel('📝 กรอกข้อมูลยืนยันตัวตน').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setLabel('เข้าเกม').setStyle(ButtonStyle.Link).setURL(cfg.gameUrl),
-  );
-  return { embeds: [embed], components: [row] };
+// ---------- ตัวช่วย ----------
+function buildComponents(guild, panel) {
+  const roles = panel.roles.map((id) => guild.roles.cache.get(id)).filter(Boolean);
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('rp:select')
+    .setPlaceholder(panel.mode === 'multiple' ? 'เลือกยศของคุณ (เลือกได้หลายยศ)' : 'เลือกยศของคุณ')
+    .setMinValues(1)
+    .setMaxValues(panel.mode === 'multiple' ? roles.length : 1)
+    .addOptions(roles.map((r) => ({ label: r.name.slice(0, 100), value: r.id })));
+  const reset = new ButtonBuilder()
+    .setCustomId('rp:reset')
+    .setLabel('รีเซ็ตยศของคุณ')
+    .setEmoji('🔄')
+    .setStyle(ButtonStyle.Danger);
+  return [new ActionRowBuilder().addComponents(select), new ActionRowBuilder().addComponents(reset)];
 }
 
-// ---------- Modal ----------
-function buildModal() {
-  const username = new TextInputBuilder()
-    .setCustomId('username').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20);
-
-  const proof = new FileUploadBuilder()
-    .setCustomId('proof').setRequired(true).setMinValues(1).setMaxValues(10);
-
-  return new ModalBuilder()
-    .setCustomId('rank_form')
-    .setTitle('อัพเดตยศ')
-    .addLabelComponents(
-      new LabelBuilder().setLabel('ชื่อผู้ใช้ Roblox').setDescription('ชื่อหลัง @ (ไม่ใช่ชื่อที่แสดง)').setTextInputComponent(username),
-      new LabelBuilder().setLabel('รูปยืนยัน').setDescription('รูปในเกมที่เห็นชื่อและยศบนหัว ใส่ได้ 1 ถึง 10 รูป').setFileUploadComponent(proof),
-    );
+// ตรวจว่ายศนี้แจกได้ไหม (กันแอดมินปลอมสิทธิ์ยกระดับ และกันยศที่บอทแตะไม่ได้)
+function checkAssignable(i, role) {
+  if (role.id === i.guild.id) return '@everyone ใช้ไม่ได้';
+  if (role.managed) return `${role.name} เป็นยศของบอท/อินทิเกรชัน`;
+  if (!role.editable) return `ยศบอทต้องอยู่**สูงกว่า** ${role.name} (ลากยศบอทขึ้นในตั้งค่า Roles)`;
+  if (role.permissions.any(DANGEROUS)) return `${role.name} มีสิทธิ์อันตราย (แอดมิน/แบน/จัดการ ฯลฯ) จึงไม่อนุญาตให้แจกผ่านแผง`;
+  if (i.guild.ownerId !== i.user.id && i.member.roles.highest.comparePositionTo(role) <= 0) {
+    return `คุณไม่สามารถแจกยศ ${role.name} ได้ เพราะยศของคุณไม่สูงกว่ายศนั้น`;
+  }
+  return null;
 }
 
-const isReviewer = (m) => cfg.reviewerRoleIds.some((id) => m.roles.cache.has(id)) ||
-  m.permissions.has(PermissionFlagsBits.Administrator);
+async function refreshPanelMessage(guild, messageId, panel) {
+  const channel = await guild.channels.fetch(panel.channelId);
+  const msg = await channel.messages.fetch(messageId);
+  await msg.edit({ components: buildComponents(guild, panel) });
+}
 
-const pending = new Set(); // กันส่งซ้ำ
-
-client.on(Events.InteractionCreate, async (i) => {
+// ---------- จัดการ interaction ----------
+client.on('interactionCreate', async (i) => {
   try {
-    // /setuprankpanel
-    if (i.isChatInputCommand() && i.commandName === 'setuprankpanel') {
-      await i.channel.send(panelPayload());
-      return i.reply({ content: 'ส่งแผงเรียบร้อย ✅', flags: MessageFlags.Ephemeral });
+    if (!i.inGuild()) return;
+
+    // /rolepanel ...
+    if (i.isChatInputCommand() && i.commandName === 'rolepanel') {
+      const sub = i.options.getSubcommand();
+      await i.guild.roles.fetch();
+
+      if (sub === 'create') {
+        const roles = [];
+        for (let n = 1; n <= ROLE_SLOTS; n++) {
+          const r = i.options.getRole(`role${n}`);
+          if (r && !roles.some((x) => x.id === r.id)) roles.push(r);
+        }
+        for (const r of roles) {
+          const err = checkAssignable(i, r);
+          if (err) return i.reply(ephemeral(`❌ ${err}`));
+        }
+
+        const imageUrl = i.options.getString('image_url');
+        if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
+          return i.reply(ephemeral('❌ ลิงก์รูปต้องขึ้นต้นด้วย http:// หรือ https://'));
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(0xff6b9d)
+          .setTitle(i.options.getString('title'))
+          .setFooter({ text: '๛ หากต้องการเอายศออกสามารถกดรีเซ็ตได้เลย' });
+        const desc = i.options.getString('description');
+        if (desc) embed.setDescription(desc.replace(/\\n/g, '\n'));
+        if (imageUrl) embed.setImage(imageUrl);
+
+        const panel = {
+          guildId: i.guildId,
+          channelId: i.channelId,
+          mode: i.options.getString('mode') ?? 'single',
+          roles: roles.map((r) => r.id),
+        };
+        const msg = await i.channel.send({ embeds: [embed], components: buildComponents(i.guild, panel) });
+        db[msg.id] = panel;
+        save();
+        return i.reply(ephemeral(`✅ สร้างแผงเรียบร้อย (ID ข้อความ: \`${msg.id}\`) — ใช้ ID นี้กับ /rolepanel add / remove`));
+      }
+
+      // add / remove
+      const messageId = i.options.getString('message_id');
+      const panel = db[messageId];
+      if (!panel || panel.guildId !== i.guildId) {
+        return i.reply(ephemeral('❌ ไม่พบแผงนี้ในเซิร์ฟเวอร์นี้ (ตรวจ ID ข้อความอีกครั้ง)'));
+      }
+      const role = i.options.getRole('role');
+
+      if (sub === 'add') {
+        if (panel.roles.includes(role.id)) return i.reply(ephemeral('ยศนี้อยู่ในแผงแล้วครับ'));
+        if (panel.roles.length >= MAX_ROLES) return i.reply(ephemeral(`❌ แผงหนึ่งใส่ได้สูงสุด ${MAX_ROLES} ยศ`));
+        const err = checkAssignable(i, role);
+        if (err) return i.reply(ephemeral(`❌ ${err}`));
+        panel.roles.push(role.id);
+      } else {
+        if (!panel.roles.includes(role.id)) return i.reply(ephemeral('ยศนี้ไม่ได้อยู่ในแผงครับ'));
+        if (panel.roles.length === 1) return i.reply(ephemeral('❌ แผงต้องมีอย่างน้อย 1 ยศ'));
+        panel.roles = panel.roles.filter((id) => id !== role.id);
+      }
+      await refreshPanelMessage(i.guild, messageId, panel);
+      save();
+      return i.reply(ephemeral(sub === 'add' ? `✅ เพิ่ม ${role.name} เข้าแผงแล้ว` : `✅ เอา ${role.name} ออกจากแผงแล้ว`));
     }
 
-    // /announceupdate -> เปิดฟอร์มประกาศอัพเดท
-    if (i.isChatInputCommand() && i.commandName === 'announceupdate') {
-      const version = new TextInputBuilder()
-        .setCustomId('version').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30)
-        .setValue(cfg.currentVersion || '');
-      const details = new TextInputBuilder()
-        .setCustomId('details').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(3500);
-      return i.showModal(
-        new ModalBuilder()
-          .setCustomId('update_form')
-          .setTitle('ประกาศอัพเดท')
-          .addLabelComponents(
-            new LabelBuilder().setLabel('เวอร์ชัน').setDescription('เช่น V0.1.67').setTextInputComponent(version),
-            new LabelBuilder().setLabel('รายละเอียดอัพเดท').setDescription('พิมพ์ทีละบรรทัด 1 บรรทัด = 1 ข้อ').setTextInputComponent(details),
-          ),
-      );
-    }
-
-    // ส่งฟอร์มประกาศอัพเดท
-    if (i.isModalSubmit() && i.customId === 'update_form') {
+    // สมาชิกเลือกยศ
+    if (i.isStringSelectMenu() && i.customId === 'rp:select') {
+      const panel = db[i.message.id];
+      if (!panel) return i.reply(ephemeral('⚠️ แผงนี้ไม่ได้ลงทะเบียนไว้ ให้แอดมินสร้างใหม่ด้วย /rolepanel create'));
       await i.deferReply({ flags: MessageFlags.Ephemeral });
-      const version = i.fields.getTextInputValue('version').trim();
-      const lines = i.fields.getTextInputValue('details').split('\n').map((l) => l.trim()).filter(Boolean)
-        .map((l) => (/^[•\-\*\+]/.test(l) ? '• ' + l.replace(/^[•\-\*\+]\s*/, '') : '• ' + l));
 
-      const embed = new EmbedBuilder()
-        .setColor(cfg.color)
-        .setTitle(`🆕 อัพเดท ${version}`)
-        .setDescription(lines.join('\n').slice(0, 4000))
-        .setFooter({ text: i.guild.name, iconURL: i.guild.iconURL() || undefined })
-        .setTimestamp();
-      const row = cfg.gameUrl
-        ? new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('เข้าเกม').setStyle(ButtonStyle.Link).setURL(cfg.gameUrl))
-        : null;
+      await i.guild.roles.fetch();
+      const member = await i.guild.members.fetch(i.user.id);
+      const valid = panel.roles.filter((id) => i.guild.roles.cache.has(id));
+      const selected = i.values.filter((v) => valid.includes(v));
 
-      const ch = cfg.updateChannelId ? await client.channels.fetch(cfg.updateChannelId) : i.channel;
-      await ch.send({
-        content: cfg.updatePingRoleId ? `<@&${cfg.updatePingRoleId}>` : undefined,
-        embeds: [embed],
-        components: row ? [row] : [],
+      const toRemove = valid.filter((id) => !selected.includes(id) && member.roles.cache.has(id));
+      const toAdd = selected.filter((id) => !member.roles.cache.has(id));
+
+      const stuck = [...toRemove, ...toAdd].find((id) => !i.guild.roles.cache.get(id).editable);
+      if (stuck) {
+        return i.editReply('❌ ยศบอทต้องอยู่สูงกว่ายศในแผงนี้ ให้แอดมินลากยศบอทขึ้นไปด้านบนครับ');
+      }
+
+      if (toRemove.length) await member.roles.remove(toRemove, 'แผงรับยศ');
+      if (toAdd.length) await member.roles.add(toAdd, 'แผงรับยศ');
+
+      return i.editReply({
+        content: `✅ ตอนนี้คุณมียศ: ${selected.map((id) => `<@&${id}>`).join(' ')}`,
+        allowedMentions: { parse: [] },
       });
-      return i.editReply(`✅ ประกาศอัพเดท ${version} แล้วที่ ${ch}`);
     }
 
-    // /setupticketpanel
-    if (i.isChatInputCommand() && i.commandName === 'setupticketpanel') {
-      const embed = new EmbedBuilder()
-        .setColor(cfg.color)
-        .setTitle('🎫 ติดต่อแอดมิน')
-        .setDescription('มีปัญหาหรือต้องการสอบถาม? กดปุ่มด้านล่างเพื่อเปิดห้องส่วนตัวคุยกับทีมงาน');
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 เปิดตั๋ว').setStyle(ButtonStyle.Primary),
-      );
-      await i.channel.send({ embeds: [embed], components: [row] });
-      return i.reply({ content: 'ส่งแผงตั๋วเรียบร้อย ✅', flags: MessageFlags.Ephemeral });
-    }
-
-    // เปิดตั๋ว
-    if (i.isButton() && i.customId === 'ticket_open') {
-      const exist = i.guild.channels.cache.find((c) => c.topic === `ticket:${i.user.id}`);
-      if (exist) return i.reply({ content: `คุณมีตั๋วที่เปิดอยู่แล้ว: ${exist}`, flags: MessageFlags.Ephemeral });
-
+    // รีเซ็ตยศ
+    if (i.isButton() && i.customId === 'rp:reset') {
+      const panel = db[i.message.id];
+      if (!panel) return i.reply(ephemeral('⚠️ แผงนี้ไม่ได้ลงทะเบียนไว้'));
       await i.deferReply({ flags: MessageFlags.Ephemeral });
-      const staffRoles = cfg.ticketStaffRoleIds || cfg.reviewerRoleIds;
-      const allow = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles];
-      const safe = i.user.username.toLowerCase().replace(/[^a-z0-9_-]/g, '') || i.user.id.slice(-6);
-      const ch = await i.guild.channels.create({
-        name: `ticket-${safe}`.slice(0, 90),
-        type: ChannelType.GuildText,
-        parent: cfg.ticketCategoryId || null,
-        topic: `ticket:${i.user.id}`,
-        permissionOverwrites: [
-          { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-          { id: i.user.id, allow },
-          { id: client.user.id, allow: [...allow, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.EmbedLinks] },
-          ...staffRoles.filter((id) => /^\d+$/.test(id) && id !== '000000000000000000').map((id) => ({ id, allow })),
-        ],
-      });
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 ปิดตั๋ว').setStyle(ButtonStyle.Danger),
-      );
-      await ch.send({ content: `<@${i.user.id}> ทีมงานจะมาตอบเร็ว ๆ นี้ อธิบายปัญหาได้เลยครับ`, components: [row] });
-      return i.editReply(`✅ เปิดตั๋วแล้ว: ${ch}`);
-    }
 
-    // ปิดตั๋ว
-    if (i.isButton() && i.customId === 'ticket_close') {
-      const ownerId = (i.channel.topic || '').replace('ticket:', '');
-      if (i.user.id !== ownerId && !isReviewer(i.member)) {
-        return i.reply({ content: 'คุณไม่มีสิทธิ์ปิดตั๋วนี้', flags: MessageFlags.Ephemeral });
-      }
-      await i.reply('🔒 กำลังปิดตั๋วใน 5 วินาที...');
-      if (cfg.logChannelId) {
-        const log = await client.channels.fetch(cfg.logChannelId).catch(() => null);
-        log?.send(`🎫 ตั๋วของ <@${ownerId}> (#${i.channel.name}) ถูกปิดโดย <@${i.user.id}>`).catch(() => {});
-      }
-      setTimeout(() => i.channel.delete().catch(() => {}), 5000);
-      return;
-    }
-
-    // เปิดฟอร์ม
-    if (i.isButton() && i.customId === 'open_form') {
-      if (pending.has(i.user.id)) {
-        return i.reply({ content: 'คุณมีคำขอที่รอตรวจสอบอยู่แล้ว (ส่งได้ทีละ 1 อัน)', flags: MessageFlags.Ephemeral });
-      }
-      return i.showModal(buildModal());
-    }
-
-    // ส่งฟอร์ม
-    if (i.isModalSubmit() && i.customId === 'rank_form') {
-      await i.deferReply({ flags: MessageFlags.Ephemeral });
-      const name = i.fields.getTextInputValue('username').trim().replace(/^@/, '');
-      const files = [...i.fields.getUploadedFiles('proof').values()];
-
-      const rUser = await getRobloxUser(name);
-      if (!rUser) return i.editReply('❌ ไม่พบชื่อผู้ใช้ Roblox นี้ ตรวจสอบตัวสะกดอีกครั้ง');
-
-      const reqNo = nextRequestNo();
-      const embed = new EmbedBuilder()
-        .setColor(cfg.color)
-        .setTitle(`📝 คำขอ #${reqNo}`)
-        .addFields(
-          { name: 'ผู้ขอ', value: `<@${i.user.id}>`, inline: true },
-          { name: 'Roblox', value: `[${rUser.name}](https://www.roblox.com/users/${rUser.id}/profile)`, inline: true },
-        )
-        .setTimestamp();
-      if (files[0]) embed.setImage(files[0].url);
-
-      const extra = files.slice(1).map((f) => f.url).join('\n');
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`ok|${i.user.id}|${rUser.id}|${reqNo}`).setLabel('อนุมัติ').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`no|${i.user.id}`).setLabel('ปฏิเสธ').setStyle(ButtonStyle.Danger),
-      );
-
-      const ch = await client.channels.fetch(cfg.reviewChannelId);
-      await ch.send({ embeds: [embed], components: [row], content: extra ? `รูปเพิ่มเติม:\n${extra}` : undefined });
-
-      pending.add(i.user.id);
-      return i.editReply('✅ ส่งคำขอแล้ว รอผู้ตรวจสอบยืนยัน ผลจะแจ้งทาง DM');
-    }
-
-    // อนุมัติ / ปฏิเสธ
-    if (i.isButton() && (i.customId.startsWith('ok|') || i.customId.startsWith('no|'))) {
-      if (!isReviewer(i.member)) {
-        return i.reply({ content: 'คุณไม่มีสิทธิ์ตรวจสอบ', flags: MessageFlags.Ephemeral });
-      }
-      const [action, discordId, robloxId, reqNo] = i.customId.split('|');
-      await i.deferUpdate();
-      const member = await i.guild.members.fetch(discordId).catch(() => null);
-      const finish = async (text) => {
-        pending.delete(discordId);
-        const e = EmbedBuilder.from(i.message.embeds[0]).setFooter({ text: `${text} โดย ${i.user.tag}` });
-        await i.editReply({ embeds: [e], components: [] });
-      };
-      const dm = (msg) => member?.send(msg).catch(() => {});
-
-      if (action === 'no') {
-        await dm('❌ คำขออัพเดทยศของคุณถูกปฏิเสธ โปรดตรวจสอบรูปและข้อมูลแล้วส่งใหม่');
-        return finish('ปฏิเสธ');
-      }
-
-      if (!member) return finish('ผู้ขอออกจากเซิร์ฟเวอร์แล้ว');
-
-      // ดึงชื่อ Roblox ล่าสุดตอนอนุมัติ
-      const res = await fetch(`https://users.roblox.com/v1/users/${robloxId}`).then((r) => r.json());
-      const rName = res.name;
-
-      // ผูกบัญชี (ใช้ซิงก์ชื่ออัตโนมัติภายหลัง)
-      const data = loadData();
-      data.links[discordId] = { robloxId: Number(robloxId), robloxName: rName };
-      saveData(data);
-
-      // ให้ role "ยืนยันแล้ว" และถอด role "ยังไม่ยืนยัน"
-      if (cfg.verifiedRoleId) await member.roles.add(cfg.verifiedRoleId).catch(() => {});
-      if (cfg.unverifiedRoleId) await member.roles.remove(cfg.unverifiedRoleId).catch(() => {});
-
-      const nick = buildNick(member, rName);
-      let nickOk = true;
-      let nickWhy = '';
-      await member.setNickname(nick).catch((e) => {
-        nickOk = false;
-        console.error('เปลี่ยนชื่อเล่นไม่ได้:', e.code, e.message);
-        if (member.id === i.guild.ownerId) nickWhy = 'เป็นเจ้าของเซิร์ฟเวอร์ บอทเปลี่ยนชื่อให้ไม่ได้';
-        else if (e.code === 50013) nickWhy = 'role บอทต่ำกว่า role ของคนนี้ หรือบอทไม่มีสิทธิ์ Manage Nicknames';
-        else nickWhy = `error ${e.code || ''}`;
-      });
-
-      // การ์ดประกาศผล
-      const avatar = await getRobloxAvatar(robloxId);
-      const result = new EmbedBuilder()
-        .setColor(0x57f287)
-        .setTitle('✅ อัพเดทเรียบร้อย')
-        .setDescription(`คำขอ **${reqNo ? '#' + reqNo : ''}** ได้รับการอนุมัติแล้ว ยินดีด้วย 🎉`)
-        .addFields({ name: '🏷️ ชื่อใหม่', value: `\`${nick}\``, inline: true })
-        .setFooter({ text: i.guild.name, iconURL: i.guild.iconURL() || undefined })
-        .setTimestamp();
-      if (avatar) result.setThumbnail(avatar);
-
-      // ส่งการ์ดประกาศผลทาง DM
-      const dmOk = await member.send({ embeds: [result] }).then(() => true).catch(() => false);
-
-      const notes = [];
-      if (!nickOk) notes.push(`เปลี่ยนชื่อไม่ได้: ${nickWhy}`);
-      if (!dmOk) notes.push('ส่ง DM ไม่ได้ (ผู้ใช้ปิด DM)');
-      return finish(notes.length ? `อนุมัติ (${notes.join(', ')})` : 'อนุมัติ');
+      await i.guild.roles.fetch();
+      const member = await i.guild.members.fetch(i.user.id);
+      const toRemove = panel.roles.filter((id) => member.roles.cache.has(id) && i.guild.roles.cache.get(id)?.editable);
+      if (toRemove.length) await member.roles.remove(toRemove, 'รีเซ็ตยศจากแผง');
+      return i.editReply(toRemove.length ? `🔄 เอายศออก ${toRemove.length} ยศเรียบร้อย` : 'คุณยังไม่มียศจากแผงนี้ครับ');
     }
   } catch (err) {
     console.error(err);
-    const msg = '⚠️ เกิดข้อผิดพลาด ลองใหม่อีกครั้งหรือแจ้งแอดมิน';
-    if (i.deferred || i.replied) i.editReply(msg).catch(() => {});
-    else i.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
+    const msg = ephemeral('⚠️ เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะครับ');
+    if (i.deferred || i.replied) i.followUp(msg).catch(() => {});
+    else i.reply(msg).catch(() => {});
   }
 });
 
-// ---------- บอทแชท AI (บุคลิกตามที่ตั้งใน config.aiPersona) ----------
-const aiHistory = []; // [{role:'user'|'model', text}] ประวัติสั้น ๆ ของห้องแชท
-const aiCooldown = new Map(); // userId -> เวลาที่ส่งล่าสุด
-const AI_KEEP = 12;
-
-async function askAI(history) {
-  const persona =
-    `${cfg.aiPersona}\n\n` +
-    'กฎ: ตอบสั้น เป็นกันเองเหมือนแชทในดิสคอร์ด ไม่เกิน 2-3 ประโยค ' +
-    'ข้อความผู้ใช้จะขึ้นต้นด้วย "ชื่อ: " เพื่อบอกว่าใครพูด ห้ามขึ้นต้นคำตอบด้วยชื่อตัวเอง ' +
-    'ถ้ามีคนถามว่าเป็นคนหรือบอท ให้ตอบตรง ๆ ว่าเป็นบอท AI ห้ามอ้างว่าเป็นคนจริง ๆ';
-
-  // รวมข้อความ role เดียวกันที่ติดกัน (user = คนในห้อง, assistant = บอท)
-  const messages = [{ role: 'system', content: persona }];
-  for (const h of history) {
-    const role = h.role === 'model' ? 'assistant' : 'user';
-    const last = messages[messages.length - 1];
-    if (last.role === role) last.content += '\n' + h.text;
-    else messages.push({ role, content: h.text });
-  }
-
-  const headers = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${(process.env.XAI_API_KEY || '').trim()}`,
-  };
-  const model = cfg.aiModel || 'grok-4.7';
-
-  // 1) Responses API (ตามตัวอย่างในคอนโซล xAI)
-  const r1 = await fetch('https://api.x.ai/v1/responses', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ model, input: messages, max_output_tokens: 300 }),
-  });
-  if (r1.ok) {
-    const j = await r1.json();
-    const text = j.output_text ||
-      (j.output || []).flatMap((o) => o.content || []).filter((c) => c.type === 'output_text').map((c) => c.text).join('');
-    if (text) return text.trim();
-  } else if ([401, 402, 403, 429].includes(r1.status)) {
-    throw new Error(`AI API ${r1.status}: ${(await r1.text()).slice(0, 200)}`);
-  }
-
-  // 2) สำรอง: Chat Completions
-  const r2 = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ model, messages, max_tokens: 300, temperature: 1 }),
-  });
-  if (!r2.ok) {
-    throw new Error(`AI API ${r2.status}: ${(await r2.text()).slice(0, 200)} (responses: ${r1.status})`);
-  }
-  const j2 = await r2.json();
-  return j2.choices?.[0]?.message?.content?.trim() || '';
-}
-
-client.on(Events.MessageCreate, async (msg) => {
-  try {
-    if (!cfg.aiChannelId || !process.env.XAI_API_KEY) return; // ปิดอยู่ถ้ายังไม่ตั้งค่า
-    if (msg.author.bot || msg.channelId !== cfg.aiChannelId) return;
-    if (!msg.content.trim()) {
-      console.log('[AI] ได้ข้อความแต่เนื้อหาว่าง: น่าจะยังไม่ได้เปิด Message Content Intent ใน Developer Portal (หรือเป็นข้อความที่ไม่มีตัวอักษร)');
-      return;
-    }
-    console.log(`[AI] ได้ข้อความจาก ${msg.author.username}: กำลังถาม Grok...`);
-
-    const now = Date.now();
-    if (now - (aiCooldown.get(msg.author.id) || 0) < 3000) return; // กันสแปม 3 วินาที
-    aiCooldown.set(msg.author.id, now);
-
-    const name = msg.member?.displayName || msg.author.username;
-    aiHistory.push({ role: 'user', text: `${name}: ${msg.content.slice(0, 500)}` });
-    while (aiHistory.length > AI_KEEP) aiHistory.shift();
-
-    await msg.channel.sendTyping().catch(() => {});
-    const answer = await askAI(aiHistory);
-    if (!answer) return;
-
-    aiHistory.push({ role: 'model', text: answer });
-    while (aiHistory.length > AI_KEEP) aiHistory.shift();
-
-    await msg.reply({ content: answer.slice(0, 1900), allowedMentions: { parse: [], repliedUser: false } });
-  } catch (err) {
-    console.error('AI chat error:', err.message);
+// ล้างข้อมูลเมื่อแผงถูกลบ / บอทถูกเตะออก
+client.on('messageDelete', (m) => {
+  if (db[m.id]) {
+    delete db[m.id];
+    save();
   }
 });
-
-// ระบบความปลอดภัยเซิร์ฟเวอร์ (ตั้งค่าที่ cfg.security ใน config.js)
-try {
-  require('./security')(client, cfg);
-} catch (e) {
-  console.error('[Security] เริ่มระบบไม่สำเร็จ:', e.message);
-}
+client.on('guildDelete', (g) => {
+  for (const [id, p] of Object.entries(db)) if (p.guildId === g.id) delete db[id];
+  save();
+});
 
 client.login(process.env.DISCORD_TOKEN);
