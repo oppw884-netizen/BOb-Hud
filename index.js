@@ -84,8 +84,54 @@ const cmd = new SlashCommandBuilder()
   )
   .toJSON();
 
+// ---------- /donator ----------
+const DON_FILE = path.join(__dirname, 'donator.json');
+let don = {}; // { [guildId]: { title, description, imageUrl, link, roleId } }
+try {
+  don = JSON.parse(fs.readFileSync(DON_FILE, 'utf8'));
+} catch {}
+const saveDon = () => fs.writeFileSync(DON_FILE, JSON.stringify(don, null, 2));
+
+// หน้าเริ่มต้น (ใช้ได้ทันทีโดยไม่ต้องตั้งค่า) — แก้ได้ด้วย /donator-setup
+const DON_DEFAULT = {
+  title: '🌷 ช่องทางการสนับสนุน',
+  description: ['- 🎮 **ROBLOX**', '- ⚡ **เม็ดบูสต์เซิร์ฟเวอร์**'].join('\n'),
+};
+
+const donatorCommands = [
+  new SlashCommandBuilder()
+    .setName('donator')
+    .setDescription('ดูช่องทางการสนับสนุนเซิร์ฟเวอร์')
+    .setDMPermission(false)
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('donator-setup')
+    .setDescription('ตั้งค่าหน้าสนับสนุนของเซิร์ฟเวอร์ (ใส่เฉพาะช่องที่ต้องการเปลี่ยน)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
+    .addStringOption((o) => o.setName('title').setDescription('หัวข้อ'))
+    .addStringOption((o) => o.setName('description').setDescription('เนื้อหา (ขึ้นบรรทัดใหม่ด้วย \\n, ใส่อีโมจิเซิร์ฟเวอร์ได้)'))
+    .addStringOption((o) => o.setName('image_url').setDescription('ลิงก์รูป เช่น QR'))
+    .addStringOption((o) => o.setName('link').setDescription('ลิงก์ปุ่มโดเนท'))
+    .addRoleOption((o) => o.setName('role').setDescription('ยศ Donator ที่ใช้กับ /donator-give'))
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('donator-give')
+    .setDescription('ให้/เอายศ Donator ของสมาชิก')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .setDMPermission(false)
+    .addUserOption((o) => o.setName('user').setDescription('สมาชิก').setRequired(true))
+    .addStringOption((o) =>
+      o
+        .setName('action')
+        .setDescription('ค่าเริ่มต้น = ให้ยศ')
+        .addChoices({ name: 'ให้ยศ', value: 'give' }, { name: 'เอายศออก', value: 'remove' })
+    )
+    .toJSON(),
+];
+
 client.once('clientReady', async () => {
-  await client.application.commands.set([cmd]); // global = ใช้ได้ทุกเซิร์ฟเวอร์
+  await client.application.commands.set([cmd, ...donatorCommands]); // global = ใช้ได้ทุกเซิร์ฟเวอร์
   console.log(`✅ ออนไลน์ในชื่อ ${client.user.tag} | อยู่ ${client.guilds.cache.size} เซิร์ฟเวอร์`);
 });
 
@@ -124,10 +170,86 @@ async function refreshPanelMessage(guild, messageId, panel) {
   await msg.edit({ components: buildComponents(guild, panel) });
 }
 
+async function handleDonator(i) {
+  const cfg = don[i.guildId] ?? {};
+
+  if (i.commandName === 'donator') {
+    const embed = new EmbedBuilder()
+      .setColor(0xffc83d)
+      .setTitle(cfg.title ?? DON_DEFAULT.title)
+      .setDescription(cfg.description ?? DON_DEFAULT.description);
+    if (cfg.imageUrl) embed.setImage(cfg.imageUrl);
+    const components = [];
+    if (cfg.link) {
+      components.push(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel('สนับสนุนที่นี่').setEmoji('💖').setStyle(ButtonStyle.Link).setURL(cfg.link)
+        )
+      );
+    }
+    return i.reply({ embeds: [embed], components, allowedMentions: { parse: [] } });
+  }
+
+  if (i.commandName === 'donator-setup') {
+    await i.guild.roles.fetch();
+    const next = { ...cfg };
+    const title = i.options.getString('title');
+    const desc = i.options.getString('description');
+    const imageUrl = i.options.getString('image_url');
+    const link = i.options.getString('link');
+    const role = i.options.getRole('role');
+
+    for (const [name, url] of [['image_url', imageUrl], ['link', link]]) {
+      if (url && !/^https?:\/\//i.test(url)) {
+        return i.reply(ephemeral(`❌ ${name} ต้องขึ้นต้นด้วย http:// หรือ https://`));
+      }
+    }
+    if (role) {
+      const err = checkAssignable(i, role);
+      if (err) return i.reply(ephemeral(`❌ ${err}`));
+      next.roleId = role.id;
+    }
+    if (title) next.title = title;
+    if (desc) next.description = desc.replace(/\\n/g, '\n');
+    if (imageUrl) next.imageUrl = imageUrl;
+    if (link) next.link = link;
+
+    don[i.guildId] = next;
+    saveDon();
+    return i.reply(ephemeral('✅ บันทึกแล้ว ลองพิมพ์ /donator เพื่อดูผลลัพธ์'));
+  }
+
+  if (i.commandName === 'donator-give') {
+    if (!cfg.roleId) {
+      return i.reply(ephemeral('❌ ยังไม่ได้ตั้งยศ Donator ใช้ `/donator-setup role:@ยศ` ก่อนครับ'));
+    }
+    await i.guild.roles.fetch();
+    const role = i.guild.roles.cache.get(cfg.roleId);
+    if (!role) return i.reply(ephemeral('❌ ยศ Donator ที่ตั้งไว้ถูกลบไปแล้ว ตั้งใหม่ด้วย /donator-setup'));
+    const err = checkAssignable(i, role);
+    if (err) return i.reply(ephemeral(`❌ ${err}`));
+
+    const target = i.options.getMember('user');
+    if (!target) return i.reply(ephemeral('❌ ไม่พบสมาชิกคนนี้ในเซิร์ฟเวอร์'));
+
+    if ((i.options.getString('action') ?? 'give') === 'give') {
+      await target.roles.add(role, `Donator โดย ${i.user.tag}`);
+      return i.reply({ content: `💖 ให้ยศ ${role} แก่ ${target} เรียบร้อย`, allowedMentions: { parse: [] } });
+    }
+    await target.roles.remove(role, `เอายศ Donator ออกโดย ${i.user.tag}`);
+    return i.reply({ content: `✅ เอายศ ${role} ออกจาก ${target} แล้ว`, allowedMentions: { parse: [] } });
+  }
+}
+
 // ---------- จัดการ interaction ----------
 client.on('interactionCreate', async (i) => {
   try {
     if (!i.inGuild()) return;
+
+    // /donator, /donator-setup, /donator-give
+    if (i.isChatInputCommand() && i.commandName.startsWith('donator')) {
+      return await handleDonator(i);
+    }
 
     // /rolepanel ...
     if (i.isChatInputCommand() && i.commandName === 'rolepanel') {
@@ -252,6 +374,10 @@ client.on('messageDelete', (m) => {
 client.on('guildDelete', (g) => {
   for (const [id, p] of Object.entries(db)) if (p.guildId === g.id) delete db[id];
   save();
+  if (don[g.id]) {
+    delete don[g.id];
+    saveDon();
+  }
 });
 
 client.login(process.env.DISCORD_TOKEN);
