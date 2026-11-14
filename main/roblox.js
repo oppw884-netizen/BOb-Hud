@@ -153,4 +153,3 @@ module.exports = function registerRoblox(client) {
 		}
 	});
 };
-
