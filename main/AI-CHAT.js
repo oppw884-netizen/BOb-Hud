@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -5,11 +7,15 @@ const net = require('net');
 const axios = require('axios');
 const { Server } = require('ssh2');
 
-const HOST = '0.0.0.0';
-const PORT = 5005;
+const HOST = process.env.SSH_HOST || '0.0.0.0';
+const PORT = Number(process.env.SSH_PORT) || 5005;
 
 const PROVIDER = 'gemini';
-const GEMINI_API_KEY = 'API KEY'; // ใส่ Gemini API Key ของคุณที่นี่
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // ตั้งใน .env (ห้ามใส่คีย์ลงในโค้ด)
+if (!GEMINI_API_KEY) {
+    console.error('ไม่พบ GEMINI_API_KEY — ตั้งค่าใน .env ก่อนรัน');
+    process.exit(1);
+}
 
 const GEMINI_MODELS = [
     'gemini-3.8-flash',
@@ -89,8 +95,29 @@ function saveUsers(users) {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
 }
 
+// เก็บรหัสผ่านแบบ scrypt + salt (รูปแบบ "scrypt$salt$hash")
 function hashPassword(password) {
-    return crypto.createHash('sha256').update(password, 'utf8').digest('hex');
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+    return `scrypt$${salt}$${hash}`;
+}
+
+// รองรับบัญชีเก่าที่เก็บเป็น sha256 ล้วน และอัปเกรดให้อัตโนมัติเมื่อล็อกอินสำเร็จ
+function checkPassword(stored, password) {
+    if (typeof stored !== 'string') return false;
+    if (stored.startsWith('scrypt$')) {
+        const [, salt, hash] = stored.split('$');
+        const calc = crypto.scryptSync(password, salt, 64);
+        const expected = Buffer.from(hash, 'hex');
+        return expected.length === calc.length && crypto.timingSafeEqual(calc, expected);
+    }
+    const legacy = crypto.createHash('sha256').update(password, 'utf8').digest('hex');
+    return legacy.length === stored.length &&
+        crypto.timingSafeEqual(Buffer.from(legacy), Buffer.from(stored));
+}
+
+function hasUser(users, username) {
+    return Object.prototype.hasOwnProperty.call(users, username);
 }
 
 function countRegistered() {
@@ -98,8 +125,14 @@ function countRegistered() {
 }
 
 function createUser(username, password) {
+    if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
+        return [false, 'Username must be 3-20 chars: letters, numbers, underscore'];
+    }
+    if (password.length < 6) {
+        return [false, 'Password must be at least 6 characters'];
+    }
     const users = loadUsers();
-    if (users[username]) {
+    if (hasUser(users, username)) {
         return [false, 'Username already exists'];
     }
     users[username] = {
@@ -112,8 +145,13 @@ function createUser(username, password) {
 
 function verifyUser(username, password) {
     const users = loadUsers();
-    if (!users[username]) return false;
-    return users[username].password === hashPassword(password);
+    if (!hasUser(users, username)) return false;
+    if (!checkPassword(users[username].password, password)) return false;
+    if (!users[username].password.startsWith('scrypt$')) {
+        users[username].password = hashPassword(password);
+        saveUsers(users);
+    }
+    return true;
 }
 
 function getIp() {
@@ -191,7 +229,12 @@ async function askGemini(history) {
                         break;
                     }
                 }
-                if (status === 404) break;
+                // คีย์ผิด/ไม่มีสิทธิ์: ลองโมเดลอื่นก็ไม่ช่วย หยุดทันที
+                if ([400, 401, 403].includes(status)) {
+                    throw new Error(`Gemini rejected the request (HTTP ${status}) — check GEMINI_API_KEY`);
+                }
+                // 404 (ไม่มีโมเดลนี้) หรือ error อื่นๆ ข้ามไปโมเดลถัดไป
+                break;
             }
         }
     }
@@ -230,7 +273,12 @@ function showBanner(stream) {
     send(stream, '  ' + CYAN + 'MODEL' + RESET + '       : ' + GEMINI_MODELS[0] + ' (+fallback)\r\n\r\n');
 }
 
-async function ask(stream, prompt) {
+// ผลลัพธ์จากโมเดลเป็น "\n" แต่เทอร์มินัล SSH ต้องใช้ "\r\n" ไม่งั้นบรรทัดจะเยื้องไปเรื่อยๆ
+function toTerminal(text) {
+    return String(text).replace(/\r?\n/g, '\r\n');
+}
+
+async function ask(stream, prompt, masked = false) {
     send(stream, prompt);
     return new Promise((resolve) => {
         let buffer = '';
@@ -254,7 +302,7 @@ async function ask(stream, prompt) {
                     return;
                 } else {
                     buffer += ch;
-                    send(stream, ch);
+                    send(stream, masked ? '*' : ch);
                 }
             }
         };
@@ -276,7 +324,7 @@ async function loginMenu(stream) {
             send(stream, '\r\n');
             const user = await ask(stream, 'New Username > ');
             if (!user) return null;
-            const pwd = await ask(stream, 'New Password > ');
+            const pwd = await ask(stream, 'New Password > ', true);
             if (!pwd) return null;
 
             const [ok, msg] = createUser(user.trim(), pwd.trim());
@@ -290,7 +338,7 @@ async function loginMenu(stream) {
             send(stream, '\r\n');
             const user = await ask(stream, 'Username > ');
             if (!user) return null;
-            const pwd = await ask(stream, 'Password > ');
+            const pwd = await ask(stream, 'Password > ', true);
             if (!pwd) return null;
 
             if (verifyUser(user.trim(), pwd.trim())) {
@@ -329,9 +377,11 @@ async function chatLoop(stream, username) {
 
     return new Promise((resolve) => {
         let buffer = '';
+        let busy = false; // กันพิมพ์ซ้อนระหว่างรอ AI ตอบ (ไม่งั้นประวัติแชทเพี้ยน)
         const dataHandler = async (chunk) => {
             const text = chunk.toString('utf8');
             for (const ch of text) {
+                if (busy) continue;
                 if (ch === '\r' || ch === '\n') {
                     send(stream, '\r\n');
                     const userMsg = buffer.trim();
@@ -369,6 +419,7 @@ async function chatLoop(stream, username) {
                     }
 
                     history.push({ role: 'user', content: userMsg });
+                    busy = true;
 
                     try {
                         send(stream, '\r\n');
@@ -377,14 +428,16 @@ async function chatLoop(stream, username) {
 
                         const answer = await askGemini(history);
                         history.push({ role: 'assistant', content: answer });
-                        send(stream, GREEN + 'AI  > ' + RESET + answer + '\r\n\r\n');
+                        send(stream, GREEN + 'AI  > ' + RESET + toTerminal(answer) + '\r\n\r\n');
                         setWindowTitleCount(stream);
                         send(stream, CYAN + username + ' > ' + RESET);
                     } catch (e) {
                         setWindowTitleCount(stream);
-                        send(stream, RED + '[Error] ' + e.message + RESET + '\r\n\r\n');
+                        send(stream, RED + '[Error] ' + toTerminal(e.message) + RESET + '\r\n\r\n');
                         send(stream, CYAN + username + ' > ' + RESET);
                         history.pop();
+                    } finally {
+                        busy = false;
                     }
                 } else if (ch === '\x7f' || ch === '\x08') {
                     if (buffer.length > 0) {
@@ -406,13 +459,16 @@ async function chatLoop(stream, username) {
     });
 }
 
-// สร้าง Host Key อัตโนมัติ (หรือใช้คีย์จริง)
+// Host Key: ใช้ไฟล์เดิมถ้ามี ไม่งั้นสร้างใหม่แล้วบันทึกไว้
+// (ถ้าสร้างใหม่ทุกครั้งที่รัน ไคลเอนต์จะเจอคำเตือน "host key changed" ตลอด)
+const HOST_KEY_FILE = path.join(__dirname, 'ssh_host_rsa_key');
 let hostKey;
 try {
-    hostKey = fs.readFileSync('ssh_host_rsa_key');
+    hostKey = fs.readFileSync(HOST_KEY_FILE);
 } catch (e) {
     const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
     hostKey = privateKey.export({ type: 'pkcs1', format: 'pem' });
+    fs.writeFileSync(HOST_KEY_FILE, hostKey, { mode: 0o600 });
 }
 
 const server = new net.Server((client) => {
@@ -471,3 +527,4 @@ server.listen(PORT, HOST, () => {
     console.log('  TYPE : SSH');
     console.log('');
 });
+
