@@ -59,5 +59,51 @@ const statuses = [
     // ตั้งเวลาให้เปลี่ยนข้อความทุกๆ 8 วินาที (8000 มิลลิวินาที)
     setInterval(updateStatus, 8000);
 });
+// ระบบคำสั่งเช็กสถานะ (!ping หรือ !status)
+client.on('messageCreate', async (message) => {
+    // ป้องกันไม่ให้บอทตอบกลับข้อความของตัวเองหรือบอทตัวอื่น
+    if (message.author.bot) return;
 
+    // ตรวจสอบว่าพิมพ์คำสั่ง !ping หรือ !status หรือไม่
+    if (message.content === '!ping' || message.content === '!status') {
+        // ส่งข้อความชั่วคราวก่อนเพื่อคำนวณความเร็วในการตอบกลับ
+        const sent = await message.reply('กำลังตรวจสอบสถานะระบบ...');
+
+        // คำนวณความหน่วง (Round-trip latency)
+        const latency = sent.createdTimestamp - message.createdTimestamp;
+        const apiPing = client.ws.ping;
+
+        // คำนวณเวลาที่บอทเปิดทำงาน (Uptime)
+        const totalSeconds = Math.floor(client.uptime / 1000);
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const uptimeString = `${days} วัน ${hours} ชม. ${minutes} นาที ${seconds} วินาที`;
+
+        // รวบรวมข้อมูลสถิติ
+        const totalMembers = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
+        const totalServers = client.guilds.cache.size;
+
+        // สร้าง Embed แสดงผลสุดเท่
+        const embed = new EmbedBuilder()
+            .setColor('#5865F2' ) // สีธีม Discord
+            .setTitle('🤖 สถานะระบบ BOb-Hud Bot')
+            .addFields(
+                { name: '🏓 ความหน่วงข้อความ (Latency)', value: `${latency}ms`, inline: true },
+                { name: '🌐 API WebSocket (Ping)', value: `${apiPing}ms`, inline: true },
+                { name: '⏱️ ระยะเวลาเปิดทำงาน (Uptime)', value: uptimeString, inline: false },
+                { name: '👥 จำนวนสมาชิกทั้งหมด', value: `${totalMembers} คน`, inline: true },
+                { name: '🏠 จำนวนเซิร์ฟเวอร์', value: `${totalServers} เซิร์ฟเวอร์`, inline: true }
+            )
+            .setTimestamp()
+            .setFooter({ text: `ร้องขอโดย ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+
+        // แก้ไขข้อความเดิมให้กลายเป็น Embed
+        await sent.edit({ content: null, embeds: [embed] });
+    }
+});
+
+// อย่าลืมใส่ Token ของคุณ
+client.login('DISCORD_TOKEN');
 client.login('DISCORD_TOKEN');
