@@ -108,6 +108,14 @@ client.on(Events.MessageCreate, async (message) => {
     }
 });
 
+client.user.setPresence({
+    activities: [{
+        name: 'VRChat',           // หรือชื่อเกม VR อื่นๆ เช่น 'Beat Saber', 'Half-Life: Alyx'
+        type: ActivityType.Playing
+    }],
+    status: 'online'
+});
+
 // ฟีเจอร์เสริม (ใช้ client ตัวเดียวกัน ไม่ต้อง login ซ้ำ)
 registerRoblox(client);
 registerVoice(client);
