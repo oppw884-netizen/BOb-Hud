@@ -21,11 +21,5 @@ async def on_ready():
     else:
         print("ไม่พบ Voice Channel ตาม ID")
 
-  
-    streaming = discord.Streaming(
-        name="พ่องมุงตาย",  
-        url="https://www.twitch.tv/discord"   
-    )
-    await bot.change_presence(activity=streaming)
 
 bot.run("DISCORD_TOKEN")
