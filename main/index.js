@@ -115,4 +115,3 @@ client.on(Events.Error, (error) => console.error('Discord client error:', error)
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
 
 client.login(token);
-
