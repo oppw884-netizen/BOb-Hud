@@ -1,26 +1,26 @@
-const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
+require('dotenv').config();
+
+const { Client, GatewayIntentBits, ActivityType, EmbedBuilder, Events } = require('discord.js');
+const registerRoblox = require('./roblox');
+const registerVoice = require('./Join_Voice');
+
+const token = process.env.DISCORD_TOKEN;
+if (!token) {
+    console.error('ไม่พบ DISCORD_TOKEN — คัดลอก .env.example เป็น .env แล้วใส่โทเคนบอทก่อน');
+    process.exit(1);
+}
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers, // จำเป็นถ้าต้องการนับจำนวนคนในเซิร์ฟเวอร์
+        GatewayIntentBits.GuildMembers, // จำเป็นถ้าต้องการนับจำนวนคนในเซิร์ฟเวอร์ (ต้องเปิด Intent นี้ใน Developer Portal ด้วย)
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
     ]
 });
 
-client.once('ready', () => {
-    console.log(`บอทออนแล้ว: ${client.user.tag}`);
-
-    let index = 0;
-
-    // ฟังก์ชันสำหรับอัปเดตสถานะ
-    const updateStatus = () => {
-        // นับจำนวนสมาชิกทั้งหมดในทุกเซิร์ฟเวอร์ที่บอทอยู่
-        const totalMembers = client.guilds.cache.reduce((acc, guild) => acc + guild.memberCount, 0);
-
-        // รายการข้อความที่จะให้สลับวนไปเรื่อยๆ (แก้ไข/เพิ่มได้ตามใจชอบ)
+// รายการข้อความที่จะให้สลับวนไปเรื่อยๆ (แก้ไข/เพิ่มได้ตามใจชอบ)
 const statuses = [
     'พ่องมุงตาย',
     'ไอ้เวรเอ๊ย',
@@ -39,7 +39,13 @@ const statuses = [
     'เหี้ยอะไรเนี่ย',
 ];
 
-        // ตั้งค่าสถานะ Streaming
+// Events.ClientReady ใช้ได้ทั้ง discord.js เวอร์ชันเก่าและใหม่ ('ready' / 'clientReady')
+client.once(Events.ClientReady, () => {
+    console.log(`บอทออนแล้ว: ${client.user.tag}`);
+
+    let index = 0;
+
+    const updateStatus = () => {
         client.user.setPresence({
             activities: [{
                 name: statuses[index],
@@ -53,57 +59,60 @@ const statuses = [
         index = (index + 1) % statuses.length;
     };
 
-    // เรียกใช้งานทันที 1 ครั้งตอนบอทเปิด
     updateStatus();
-
-    // ตั้งเวลาให้เปลี่ยนข้อความทุกๆ 8 วินาที (8000 มิลลิวินาที)
-    setInterval(updateStatus, 8000);
+    // Discord จำกัดการเปลี่ยน presence (ประมาณ 5 ครั้ง/20 วินาที) จึงตั้งไว้ 15 วินาทีให้ปลอดภัย
+    setInterval(updateStatus, 15000);
 });
+
 // ระบบคำสั่งเช็กสถานะ (!ping หรือ !status)
-client.on('messageCreate', async (message) => {
-    // ป้องกันไม่ให้บอทตอบกลับข้อความของตัวเองหรือบอทตัวอื่น
+client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
 
-    // ตรวจสอบว่าพิมพ์คำสั่ง !ping หรือ !status หรือไม่
     if (message.content === '!ping' || message.content === '!status') {
-        // ส่งข้อความชั่วคราวก่อนเพื่อคำนวณความเร็วในการตอบกลับ
-        const sent = await message.reply('กำลังตรวจสอบสถานะระบบ...');
+        try {
+            const sent = await message.reply('กำลังตรวจสอบสถานะระบบ...');
 
-        // คำนวณความหน่วง (Round-trip latency)
-        const latency = sent.createdTimestamp - message.createdTimestamp;
-        const apiPing = client.ws.ping;
+            // ความหน่วงแบบ Round-trip
+            const latency = sent.createdTimestamp - message.createdTimestamp;
+            const apiPing = client.ws.ping;
 
-        // คำนวณเวลาที่บอทเปิดทำงาน (Uptime)
-        const totalSeconds = Math.floor(client.uptime / 1000);
-        const days = Math.floor(totalSeconds / 86400);
-        const hours = Math.floor((totalSeconds % 86400) / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        const uptimeString = `${days} วัน ${hours} ชม. ${minutes} นาที ${seconds} วินาที`;
+            // เวลาที่บอทเปิดทำงาน
+            const totalSeconds = Math.floor(client.uptime / 1000);
+            const days = Math.floor(totalSeconds / 86400);
+            const hours = Math.floor((totalSeconds % 86400) / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            const uptimeString = `${days} วัน ${hours} ชม. ${minutes} นาที ${seconds} วินาที`;
 
-        // รวบรวมข้อมูลสถิติ
-        const totalMembers = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
-        const totalServers = client.guilds.cache.size;
+            const totalMembers = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
+            const totalServers = client.guilds.cache.size;
 
-        // สร้าง Embed แสดงผลสุดเท่
-        const embed = new EmbedBuilder()
-            .setColor('#5865F2' ) // สีธีม Discord
-            .setTitle('🤖 สถานะระบบ BOb-Hud Bot')
-            .addFields(
-                { name: '🏓 ความหน่วงข้อความ (Latency)', value: `${latency}ms`, inline: true },
-                { name: '🌐 API WebSocket (Ping)', value: `${apiPing}ms`, inline: true },
-                { name: '⏱️ ระยะเวลาเปิดทำงาน (Uptime)', value: uptimeString, inline: false },
-                { name: '👥 จำนวนสมาชิกทั้งหมด', value: `${totalMembers} คน`, inline: true },
-                { name: '🏠 จำนวนเซิร์ฟเวอร์', value: `${totalServers} เซิร์ฟเวอร์`, inline: true }
-            )
-            .setTimestamp()
-            .setFooter({ text: `ร้องขอโดย ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+            const embed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('🤖 สถานะระบบ BOb-Hud Bot')
+                .addFields(
+                    { name: '🏓 ความหน่วงข้อความ (Latency)', value: `${latency}ms`, inline: true },
+                    { name: '🌐 API WebSocket (Ping)', value: `${apiPing}ms`, inline: true },
+                    { name: '⏱️ ระยะเวลาเปิดทำงาน (Uptime)', value: uptimeString, inline: false },
+                    { name: '👥 จำนวนสมาชิกทั้งหมด', value: `${totalMembers} คน`, inline: true },
+                    { name: '🏠 จำนวนเซิร์ฟเวอร์', value: `${totalServers} เซิร์ฟเวอร์`, inline: true }
+                )
+                .setTimestamp()
+                .setFooter({ text: `ร้องขอโดย ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
 
-        // แก้ไขข้อความเดิมให้กลายเป็น Embed
-        await sent.edit({ content: null, embeds: [embed] });
+            await sent.edit({ content: null, embeds: [embed] });
+        } catch (error) {
+            console.error('คำสั่ง !ping/!status ผิดพลาด:', error);
+        }
     }
 });
 
-// อย่าลืมใส่ Token ของคุณ
-client.login('DISCORD_TOKEN');
-client.login('DISCORD_TOKEN');
+// ฟีเจอร์เสริม (ใช้ client ตัวเดียวกัน ไม่ต้อง login ซ้ำ)
+registerRoblox(client);
+registerVoice(client);
+
+client.on(Events.Error, (error) => console.error('Discord client error:', error));
+process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
+
+client.login(token);
+
