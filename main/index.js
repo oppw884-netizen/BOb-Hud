@@ -21,48 +21,44 @@ const client = new Client({
     ]
 });
 
-// รายการข้อความที่จะให้สลับวนไปเรื่อยๆ (แก้ไข/เพิ่มได้ตามใจชอบ)
-const statuses = [
-    'พ่องมุงตาย',
-    'ไอ้เวรเอ๊ย',
-    'สัสเอ๊ย',
-    'แม่งเอ๊ย',
-    'มึงจะบ้าหรอ',
-    'โคตรปั่น',
-    'ไอ้บ้าเอ๊ย',
-    'ชีวิตกู',
-    'อะไรวะเนี่ย',
-    'ฉิบหายแล้ว',
-    'มึงเอาจริงดิ',
-    'ไอ้ห่าเอ๊ย',
-    'บ้าบอคอแตก',
-    'กูละปวดหัว',
-    'เหี้ยอะไรเนี่ย',
+// ข้อความคำคม/สโลแกนที่จะสลับโชว์ (แก้ไข/เพิ่มได้ตามใจชอบ)
+const TAGLINES = [
+    'ทุกการเดินทางคือการเขียนประวัติศาสตร์ด้วยตัวเอง',
 ];
 
-// Events.ClientReady ใช้ได้ทั้ง discord.js เวอร์ชันเก่าและใหม่ ('ready' / 'clientReady')
+// สำคัญ: ต้องตั้ง presence ข้างใน ClientReady เท่านั้น เพราะ client.user เป็น null
+// จนกว่าบอทจะ login และ "ready" เสร็จก่อน ถ้าเรียกนอกนี้จะพังด้วย
+// "Cannot read properties of null (reading 'setPresence')"
 client.once(Events.ClientReady, () => {
     console.log(`บอทออนแล้ว: ${client.user.tag}`);
 
-    let index = 0;
+    let showingStats = true;
+    let taglineIndex = 0;
 
-    const updateStatus = () => {
+    // สลับระหว่างสถิติเรียลไทม์ (จำนวนเซิร์ฟเวอร์/ผู้ใช้) กับข้อความคำคม
+    const updatePresence = () => {
+        let name;
+
+        if (showingStats) {
+            const totalServers = client.guilds.cache.size;
+            const totalUsers = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
+            name = `[ 🌐 Servers: ${totalServers.toLocaleString('en-US')} | 👤 User: ${totalUsers.toLocaleString('en-US')} ]`;
+        } else {
+            name = TAGLINES[taglineIndex];
+            taglineIndex = (taglineIndex + 1) % TAGLINES.length;
+        }
+
         client.user.setPresence({
-            activities: [{
-                name: statuses[index],
-                type: ActivityType.Streaming,
-                url: 'https://www.youtube.com/@HIHi-s2j4q' // ต้องเป็นลิงก์ Twitch หรือ YouTube เพื่อให้ขึ้นจุดสีม่วง
-            }],
+            activities: [{ name, type: ActivityType.Watching }], // "กำลังดู ..."
             status: 'online'
         });
 
-        // เลื่อนไปข้อความถัดไป (ถ้าถึงตัวสุดท้ายจะวนกลับไปตัวแรก)
-        index = (index + 1) % statuses.length;
+        showingStats = !showingStats;
     };
 
-    updateStatus();
+    updatePresence();
     // Discord จำกัดการเปลี่ยน presence (ประมาณ 5 ครั้ง/20 วินาที) จึงตั้งไว้ 15 วินาทีให้ปลอดภัย
-    setInterval(updateStatus, 15000);
+    setInterval(updatePresence, 15000);
 });
 
 // ระบบคำสั่งเช็กสถานะ (!ping หรือ !status)
@@ -106,14 +102,6 @@ client.on(Events.MessageCreate, async (message) => {
             console.error('คำสั่ง !ping/!status ผิดพลาด:', error);
         }
     }
-});
-
-client.user.setPresence({
-    activities: [{
-        name: 'VRChat',           // หรือชื่อเกม VR อื่นๆ เช่น 'Beat Saber', 'Half-Life: Alyx'
-        type: ActivityType.Playing
-    }],
-    status: 'online'
 });
 
 // ฟีเจอร์เสริม (ใช้ client ตัวเดียวกัน ไม่ต้อง login ซ้ำ)
