@@ -3,6 +3,7 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, ActivityType, EmbedBuilder, Events } = require('discord.js');
 const registerRoblox = require('./roblox');
 const registerVoice = require('./Join_Voice');
+const registerHelp = require('./help');
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -110,6 +111,7 @@ client.on(Events.MessageCreate, async (message) => {
 // ฟีเจอร์เสริม (ใช้ client ตัวเดียวกัน ไม่ต้อง login ซ้ำ)
 registerRoblox(client);
 registerVoice(client);
+registerHelp(client);
 
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
