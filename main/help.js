@@ -1,23 +1,43 @@
 const { EmbedBuilder, Events, SlashCommandBuilder } = require('discord.js');
 
-// รายการคำสั่งทั้งหมด — เพิ่มคำสั่งใหม่แล้วมาใส่ตรงนี้ จะโผล่ใน !help และ /help เอง
-const COMMANDS = [
-    { usage: '!ping', aliases: ['!status'], description: 'เช็กความหน่วง เวลาเปิดทำงาน จำนวนสมาชิกและเซิร์ฟเวอร์' },
-    { usage: '!roblox <ชื่อผู้ใช้>', aliases: [], description: 'ดูข้อมูลผู้เล่น Roblox เพื่อน กลุ่ม ไอเทมที่ใส่ และมูลค่า Robux' },
-    { usage: '!help', aliases: ['/help'], description: 'แสดงรายการคำสั่งนี้' },
+// แบ่งคำสั่งเป็นหมวดหมู่ — เพิ่มคำสั่งใหม่หรือหมวดใหม่ได้ที่นี่ จะโผล่ใน !help และ /help เอง
+const CATEGORIES = [
+    {
+        emoji: '🔧',
+        name: 'Script Commands',
+        commands: [
+            { usage: '!ping', aliases: ['!status'], description: 'เช็กความหน่วง เวลาเปิดทำงาน จำนวนสมาชิกและเซิร์ฟเวอร์' },
+            { usage: '!roblox <ชื่อผู้ใช้>', aliases: [], description: 'ดูข้อมูลผู้เล่น Roblox เพื่อน กลุ่ม ไอเทมที่ใส่ และมูลค่า Robux' },
+        ],
+    },
+    {
+        emoji: '🛠️',
+        name: 'Admin Commands',
+        commands: [
+            { usage: '!help', aliases: ['/help'], description: 'แสดงรายการคำสั่งทั้งหมด' },
+        ],
+    },
 ];
 
 function buildHelpEmbed() {
-    const lines = COMMANDS.map((c) => {
-        const names = [c.usage, ...c.aliases].map((n) => `\`${n}\``).join(' หรือ ');
-        return `${names}\n└ ${c.description}`;
-    });
-
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor('#5865F2')
-        .setTitle('📖 คำสั่งของ BOb-Hud Bot')
-        .setDescription(lines.join('\n\n'))
-        .setFooter({ text: 'พิมพ์คำสั่งขึ้นต้นด้วย ! ในช่องแชท' });
+        .setTitle('📋 คำสั่งทั้งหมด')
+        .setFooter({ text: 'Made by BOb-Hud BOT' });
+
+    for (const category of CATEGORIES) {
+        const lines = category.commands.map((c) => {
+            const names = [c.usage, ...c.aliases].map((n) => `\`${n}\``).join(' — ');
+            return `${names} — ${c.description}`;
+        });
+
+        embed.addFields({
+            name: `${category.emoji} ${category.name}`,
+            value: lines.join('\n'),
+        });
+    }
+
+    return embed;
 }
 
 module.exports = function registerHelp(client) {
