@@ -5,7 +5,9 @@ const registerRoblox = require('./roblox');
 const registerVoice = require('./Join_Voice');
 const registerHelp = require('./help');
 const registerAuto_QUEST = require('./Auto_QUEST');
-
+const registerCopy_Emoji = require('./Copy_Emoji');
+const registerxo = require('./xo');
+const registerannounce = require('./announce')
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
     console.error('ไม่พบ DISCORD_TOKEN — คัดลอก .env.example เป็น .env แล้วใส่โทเคนบอทก่อน');
@@ -24,7 +26,7 @@ const client = new Client({
 
 // ข้อความคำคม/สโลแกนที่จะสลับโชว์ (แก้ไข/เพิ่มได้ตามใจชอบ)
 const TAGLINES = [
-    'ทุกการเดินทางคือการเขียนประวัติศาสตร์ด้วยตัวเอง',
+    'ความเป็นเราคือสั่งที่ได้ที่สุด',
 ];
 
 // สำคัญ: ต้องตั้ง presence ข้างใน ClientReady เท่านั้น เพราะ client.user เป็น null
@@ -110,7 +112,9 @@ registerRoblox(client);
 registerVoice(client);
 registerHelp(client);
 registerAuto_QUEST(client);
-
+registerCopy_Emoji(client);
+registerxo(client);
+registerannounce(client);
 
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
