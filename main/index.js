@@ -4,6 +4,7 @@ const { Client, GatewayIntentBits, ActivityType, EmbedBuilder, Events } = requir
 const registerRoblox = require('./roblox');
 const registerVoice = require('./Join_Voice');
 const registerHelp = require('./help');
+const registerAuto_QUEST = require('./Auto_QUEST');
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -108,6 +109,8 @@ client.on(Events.MessageCreate, async (message) => {
 registerRoblox(client);
 registerVoice(client);
 registerHelp(client);
+registerAuto_QUEST(client);
+
 
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
