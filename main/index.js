@@ -9,7 +9,14 @@ const registerCopy_Emoji = require('./Copy_Emoji');
 const registerxo = require('./xo');
 const registerannounce = require('./announce');
 const registertranslatorbot = require('./translatorbot');
-
+const translatorModule = require('./translatorbot');
+const registertranslatorbot =
+    typeof translatorModule === 'function'
+        ? translatorModule
+        : translatorModule.default ||
+          translatorModule.registerTranslatorBot ||
+          translatorModule.registertranslatorbot ||
+          Object.values(translatorModule).find((v) => typeof v === 'function');
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
     console.error('ไม่พบ DISCORD_TOKEN — คัดลอก .env.example เป็น .env แล้วใส่โทเคนบอทก่อน');
