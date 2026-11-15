@@ -1,14 +1,14 @@
-const {
-    SlashCommandBuilder,
-    REST,
-    Routes,
-    PermissionFlagsBits,
-    EmbedBuilder,
-    AttachmentBuilder,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
-    ActionRowBuilder
+const { 
+    SlashCommandBuilder, 
+    REST, 
+    Routes, 
+    PermissionFlagsBits, 
+    EmbedBuilder, 
+    AttachmentBuilder, 
+    ModalBuilder, 
+    TextInputBuilder, 
+    TextInputStyle, 
+    ActionRowBuilder 
 } = require('discord.js');
 
 const AdmZip = require('adm-zip');
@@ -19,11 +19,12 @@ const path = require('node:path');
 const Token = process.env.DISCORD_TOKEN || '';
 const ClientIds = process.env.CLIENT_ID || process.env.CLIENT_IDS || '';
 const AdminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => id.trim()) : [];
+const GuildId = "1109833313549570169"; // ไอดีเซิร์ฟเวอร์ของมึง เพื่อให้คำสั่ง Slash เด้งขึ้นทันที
 
 module.exports = (client) => {
     console.log("🍀 โหลดโมดูล Copy_Emoji สำเร็จ!");
 
-    client.once('ready', async () => {
+    client.once('clientReady', async () => {
         const commands = [
             new SlashCommandBuilder()
                 .setName('clear_emoji')
@@ -53,13 +54,14 @@ module.exports = (client) => {
         const rest = new REST({ version: '10' }).setToken(Token);
 
         try {
+            // ลงทะเบียนแบบระบุ Guild ID เพื่อให้คำสั่งโผล่ในดิสคอร์ดทันที
             await rest.put(
-                Routes.applicationCommands(ClientIds),
+                Routes.applicationGuildCommands(ClientIds, GuildId),
                 { body: commands }
             );
             console.log('✅ ลงทะเบียนคำสั่ง Emoji สำเร็จ!');
         } catch (err) {
-            console.error(err);
+            console.error('❌ เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง Emoji:', err);
         }
     });
 
