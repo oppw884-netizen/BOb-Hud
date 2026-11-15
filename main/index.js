@@ -53,7 +53,7 @@ client.once(Events.ClientReady, () => {
 
         client.user.setPresence({
             activities: [{ name, type: ActivityType.Watching }], // "กำลังดู ..."
-            status: 'online'
+            status: 'Do Not Disturb'
         });
 
         showingStats = !showingStats;
