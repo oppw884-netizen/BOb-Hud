@@ -11,7 +11,7 @@
     "node": ">=18"
   },
   "dependencies": {
-      "@iamtraction/google-translate": "^2.0.1"
+    "@iamtraction/google-translate": "^2.0.1",
     "@discordjs/voice": "^0.18.0",
     "adm-zip": "^0.6.1",
     "axios": "^1.7.0",
