@@ -1,90 +1,153 @@
-const { EmbedBuilder, Events, SlashCommandBuilder } = require('discord.js');
+const {
+    EmbedBuilder,
+    Events,
+    SlashCommandBuilder,
+    ActionRowBuilder,
+    StringSelectMenuBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+} = require('discord.js');
 
-// แบ่งคำสั่งเป็นหมวดหมู่ — เพิ่มคำสั่งใหม่หรือหมวดใหม่ได้ที่นี่ จะโผล่ใน !help และ /help เอง
+const MENU_ID = 'help_menu';
+const TIMEOUT_MS = 120000; // เมนูใช้งานได้ 2 นาที
+
+// เพิ่มคำสั่ง/หมวดใหม่ได้ที่นี่ เมนูและหน้า help จะอัปเดตเอง
+// บรรทัดที่มี "แก้ให้ตรง" คือชื่อคำสั่งที่ผมเดา ให้แก้เป็นของจริง
 const CATEGORIES = [
     {
+        id: 'general',
         emoji: '🔧',
-        name: 'Script Commands',
+        name: 'ทั่วไป',
+        color: '#5865F2',
+        blurb: 'คำสั่งพื้นฐานสำหรับทุกคน',
         commands: [
             { usage: '!ping', aliases: ['!status'], description: 'เช็กความหน่วง เวลาเปิดทำงาน จำนวนสมาชิกและเซิร์ฟเวอร์' },
-            { usage: '!roblox <ชื่อผู้ใช้>', aliases: [], description: 'ดูข้อมูลผู้เล่น Roblox เพื่อน กลุ่ม ไอเทมที่ใส่ และมูลค่า Robux' },
+            { usage: '!help', aliases: ['/help'], description: 'เปิดศูนย์ช่วยเหลือนี้' },
         ],
     },
     {
-        emoji: '🛠️',
-        name: 'Admin Commands',
+        id: 'game',
+        emoji: '🎮',
+        name: 'เกมและข้อมูล',
+        color: '#F1C40F',
+        blurb: 'เล่นสนุกและดูข้อมูลผู้เล่น',
         commands: [
-            { usage: '!help', aliases: ['/help'], description: 'แสดงรายการคำสั่งทั้งหมด' },
+            { usage: '!roblox <ชื่อผู้ใช้>', aliases: [], description: 'ดูข้อมูลผู้เล่น Roblox เพื่อน กลุ่ม ไอเทม และมูลค่า Robux' },
+            { usage: '!xo', aliases: [], description: 'เล่นเกม XO กับเพื่อน' }, // แก้ให้ตรง
+        ],
+    },
+    {
+        id: 'tools',
+        emoji: '🧰',
+        name: 'เครื่องมือ',
+        color: '#2ECC71',
+        blurb: 'ตัวช่วยใช้งานทุกวัน',
+        commands: [
+            { usage: '!translate <ข้อความ>', aliases: [], description: 'แปลข้อความเป็นภาษาไทย' },
+            { usage: '!qr <ลิงก์/ข้อความ>', aliases: [], description: 'สร้างรูป QR code จากลิงก์หรือข้อความ' },
+            { usage: '/emoji', aliases: [], description: 'คัดลอกอีโมจิ' }, // แก้ให้ตรง
+        ],
+    },
+    {
+        id: 'admin',
+        emoji: '🛠️',
+        name: 'แอดมิน',
+        color: '#E74C3C',
+        blurb: 'สำหรับผู้ดูแลเซิร์ฟเวอร์',
+        commands: [
+            { usage: '/announce', aliases: [], description: 'ส่งประกาศไปยังห้องที่เลือก' }, // แก้ให้ตรง
         ],
     },
 ];
 
-function buildHelpEmbed() {
-    const embed = new EmbedBuilder()
+const totalCommands = CATEGORIES.reduce((n, c) => n + c.commands.length, 0);
+
+// หน้าแรก
+function buildHomeEmbed(client) {
+    const avatar = client.user?.displayAvatarURL({ size: 256 });
+
+    const overview = CATEGORIES.map(
+        (c) => `${c.emoji} **${c.name}** — ${c.blurb} \`${c.commands.length}\``
+    ).join('\n');
+
+    return new EmbedBuilder()
         .setColor('#5865F2')
-        .setTitle('📋 คำสั่งทั้งหมด')
-        .setFooter({ text: 'Made by BOb-Hud BOT' });
-
-    for (const category of CATEGORIES) {
-        const lines = category.commands.map((c) => {
-            const names = [c.usage, ...c.aliases].map((n) => `\`${n}\``).join(' — ');
-            return `${names} — ${c.description}`;
-        });
-
-        embed.addFields({
-            name: `${category.emoji} ${category.name}`,
-            value: lines.join('\n'),
-        });
-    }
-
-    return embed;
+        .setAuthor({ name: `${client.user?.username ?? 'BOb-Hud BOT'} • ศูนย์ช่วยเหลือ`, iconURL: avatar })
+        .setTitle('✨ ยินดีต้อนรับสู่ศูนย์ช่วยเหลือ')
+        .setDescription(
+            '```\nเลือกหมวดหมู่จากเมนูด้านล่างเพื่อดูคำสั่งได้เลย\n```\n' +
+            overview +
+            '\n\n> 📌 `< >` = ต้องใส่  ·  พิมพ์คำสั่งในห้องแชตได้ทันที'
+        )
+        .setThumbnail(avatar ?? null)
+        .addFields(
+            { name: '📦 คำสั่งทั้งหมด', value: `\`${totalCommands}\``, inline: true },
+            { name: '📂 หมวดหมู่', value: `\`${CATEGORIES.length}\``, inline: true },
+            { name: '🏓 Ping', value: `\`${client.ws.ping}ms\``, inline: true }
+        )
+        .setFooter({ text: 'Made by BOb-Hud BOT' })
+        .setTimestamp();
 }
 
-module.exports = function registerHelp(client) {
-    // !help
-    client.on(Events.MessageCreate, async (message) => {
-        if (message.author.bot) return;
-        if (message.content.trim().toLowerCase() !== '!help') return;
-
-        try {
-            await message.reply({ embeds: [buildHelpEmbed()] });
-        } catch (error) {
-            console.error('คำสั่ง !help ผิดพลาด:', error);
-        }
+// หน้าของแต่ละหมวด
+function buildCategoryEmbed(client, category) {
+    const lines = category.commands.map((c) => {
+        const names = [c.usage, ...c.aliases].map((n) => `\`${n}\``).join(' · ');
+        return `### ${names}\n> ${c.description}`;
     });
 
-    // /help
-    client.on(Events.InteractionCreate, async (interaction) => {
-        if (!interaction.isChatInputCommand() || interaction.commandName !== 'help') return;
+    return new EmbedBuilder()
+        .setColor(category.color)
+        .setAuthor({
+            name: `${client.user?.username ?? 'BOb-Hud BOT'} • ศูนย์ช่วยเหลือ`,
+            iconURL: client.user?.displayAvatarURL(),
+        })
+        .setTitle(`${category.emoji} ${category.name}`)
+        .setDescription(`*${category.blurb}*\n\n${lines.join('\n')}`)
+        .setFooter({ text: `หมวด ${category.name} · ${category.commands.length} คำสั่ง` })
+        .setTimestamp();
+}
 
-        try {
-            await interaction.reply({ embeds: [buildHelpEmbed()] });
-        } catch (error) {
-            console.error('คำสั่ง /help ผิดพลาด:', error);
-        }
+function buildComponents(selectedId = null, disabled = false) {
+    const menu = new StringSelectMenuBuilder()
+        .setCustomId(MENU_ID)
+        .setPlaceholder('📂 เลือกหมวดหมู่คำสั่ง...')
+        .setDisabled(disabled)
+        .addOptions([
+            { label: 'หน้าแรก', value: 'home', emoji: '🏠', description: 'กลับไปหน้าหลัก', default: selectedId === 'home' },
+            ...CATEGORIES.map((c) => ({
+                label: c.name,
+                value: c.id,
+                emoji: c.emoji,
+                description: `${c.commands.length} คำสั่ง · ${c.blurb}`.slice(0, 100),
+                default: selectedId === c.id,
+            })),
+        ]);
+
+    const row1 = new ActionRowBuilder().addComponents(menu);
+
+    // ปุ่มด้านล่าง: ใส่ลิงก์ของคุณได้ (ต้องเป็น https://) ถ้ายังไม่มี ลบ row2 ทิ้งได้
+    const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setLabel('เซิร์ฟเวอร์ซัพพอร์ต')
+            .setEmoji('💬')
+            .setStyle(ButtonStyle.Link)
+            .setURL(process.env.SUPPORT_URL || 'https://discord.com') // แก้ให้ตรง
+    );
+
+    return [row1, row2];
+}
+
+async function sendHelp(client, sendFn, userId) {
+    const msg = await sendFn({
+        embeds: [buildHomeEmbed(client)],
+        components: buildComponents('home'),
+        fetchReply: true,
     });
 
-    // ลงทะเบียน /help ตอนบอทออนไลน์
-    // ถ้าตั้ง GUILD_ID จะขึ้นทันทีในเซิร์ฟเวอร์นั้น ถ้าไม่ตั้งจะเป็น global (อาจใช้เวลาสักพักกว่าจะขึ้น)
-    client.once(Events.ClientReady, async () => {
-        try {
-            const definition = new SlashCommandBuilder()
-                .setName('help')
-                .setDescription('แสดงรายการคำสั่งของบอท')
-                .toJSON();
+    const collector = msg.createMessageComponentCollector({ time: TIMEOUT_MS });
 
-            const guildId = process.env.GUILD_ID;
-            const guild = guildId ? client.guilds.cache.get(guildId) : null;
+    collector.on('collect', async (i) => {
+        if (i.customId !== MENU_ID) return;
 
-            if (guild) {
-                await guild.commands.set([definition]);
-                console.log(`ลงทะเบียน /help ในเซิร์ฟเวอร์ ${guild.name} แล้ว`);
-            } else {
-                await client.application.commands.set([definition]);
-                console.log('ลงทะเบียน /help แบบ global แล้ว');
-            }
-        } catch (error) {
-            console.error('ลงทะเบียน /help ไม่สำเร็จ (!help ยังใช้ได้ปกติ):', error.message);
-        }
-    });
-};
+        // เฉพาะคนที่เรียก help
