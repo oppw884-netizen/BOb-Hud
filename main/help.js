@@ -150,4 +150,72 @@ async function sendHelp(client, sendFn, userId) {
     collector.on('collect', async (i) => {
         if (i.customId !== MENU_ID) return;
 
-        // เฉพาะคนที่เรียก help
+        // เฉพาะคนที่เรียก help เท่านั้นที่กดเมนูได้
+        if (i.user.id !== userId) {
+            return i.reply({ content: '❌ เมนูนี้เป็นของคนที่พิมพ์ !help ครับ ลองพิมพ์ `!help` เองดูนะ', ephemeral: true });
+        }
+
+        const value = i.values[0];
+        const embed = value === 'home'
+            ? buildHomeEmbed(client)
+            : buildCategoryEmbed(client, CATEGORIES.find((c) => c.id === value));
+
+        await i.update({ embeds: [embed], components: buildComponents(value) });
+    });
+
+    collector.on('end', async () => {
+        try {
+            await msg.edit({ components: buildComponents(null, true) });
+        } catch {
+            // ข้อความถูกลบไปแล้ว ไม่ต้องทำอะไร
+        }
+    });
+}
+
+module.exports = function registerHelp(client) {
+    // !help
+    client.on(Events.MessageCreate, async (message) => {
+        if (message.author.bot) return;
+        if (message.content.trim().toLowerCase() !== '!help') return;
+
+        try {
+            await sendHelp(client, (opts) => message.reply({ ...opts, fetchReply: undefined }), message.author.id);
+        } catch (error) {
+            console.error('คำสั่ง !help ผิดพลาด:', error);
+        }
+    });
+
+    // /help
+    client.on(Events.InteractionCreate, async (interaction) => {
+        if (!interaction.isChatInputCommand() || interaction.commandName !== 'help') return;
+
+        try {
+            await sendHelp(client, (opts) => interaction.reply({ ...opts, fetchReply: true }), interaction.user.id);
+        } catch (error) {
+            console.error('คำสั่ง /help ผิดพลาด:', error);
+        }
+    });
+
+    // ลงทะเบียน /help ตอนบอทออนไลน์ (ใช้ create เพื่อไม่ทับ /announce และ Emoji)
+    client.once(Events.ClientReady, async () => {
+        try {
+            const definition = new SlashCommandBuilder()
+                .setName('help')
+                .setDescription('แสดงรายการคำสั่งของบอท')
+                .toJSON();
+
+            const guildId = process.env.GUILD_ID;
+            const guild = guildId ? client.guilds.cache.get(guildId) : null;
+
+            if (guild) {
+                await guild.commands.create(definition);
+                console.log(`ลงทะเบียน /help ในเซิร์ฟเวอร์ ${guild.name} แล้ว`);
+            } else {
+                await client.application.commands.create(definition);
+                console.log('ลงทะเบียน /help แบบ global แล้ว');
+            }
+        } catch (error) {
+            console.error('ลงทะเบียน /help ไม่สำเร็จ (!help ยังใช้ได้ปกติ):', error.message);
+        }
+    });
+};
