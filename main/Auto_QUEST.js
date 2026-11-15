@@ -1,5 +1,4 @@
-Cat
-﻿
+
 require("dotenv").config();
 
 const {
