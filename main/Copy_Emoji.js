@@ -19,17 +19,17 @@ const path = require('node:path');
 const Token = process.env.DISCORD_TOKEN || '';
 const ClientIds = process.env.CLIENT_ID || process.env.CLIENT_IDS || '';
 const AdminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => id.trim()) : [];
-const GuildId = "1109833313549570169"; // ไอดีเซิร์ฟเวอร์ของมึง เพื่อให้คำสั่ง Slash เด้งขึ้นทันที
 
 module.exports = (client) => {
     console.log("🍀 โหลดโมดูล Copy_Emoji สำเร็จ!");
 
-    client.once('clientReady', async () => {
+    client.once('ready', async () => {
         const commands = [
             new SlashCommandBuilder()
                 .setName('clear_emoji')
                 .setDescription('[ ⛔ คำสั่งล้างอิโมจิทั้งหมด ]')
-                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions),
+                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions)
+                .toJSON(),
             new SlashCommandBuilder()
                 .setName('add_emoji')
                 .setDescription('[ 🌵 คำสั่งเพิ่มอิโมจิ ]')
@@ -38,38 +38,27 @@ module.exports = (client) => {
                         .setDescription('[ 📂 โปรดอัพโหลดไฟล์นามสกุล .ZIP ]')
                         .setRequired(true)
                 )
-                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions),
+                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions)
+                .toJSON(),
             new SlashCommandBuilder()
                 .setName('check_emoji')
-                .setDescription('[ 💬 เช็คอิโมจิทั้งหมดในเซิร์ฟเวอร์ ]'),
+                .setDescription('[ 💬 เช็คอิโมจิทั้งหมดในเซิร์ฟเวอร์ ]')
+                .toJSON(),
             new SlashCommandBuilder()
                 .setName('copy_emoji')
                 .setDescription('[ 🍀 ก็อปปี้อิโมจิจากเซิร์ฟ ]')
+                .toJSON()
         ];
-
-        const GuildId = "1109833313549570169"; // ไอดีเซิร์ฟเวอร์ของมึง
-
-        try {
-            const guild = client.guilds.cache.get(GuildId) || await client.guilds.fetch(GuildId);
-            if (guild) {
-                // ใช้คำสั่งผ่านตัวบอทในเซิร์ฟเวอร์โดยตรง หลบปัญหา Missing Access
-                await guild.commands.set(commands);
-                console.log('✅ ลงทะเบียนคำสั่ง Emoji สำเร็จ!');
-            }
-        } catch (err) {
-            console.error('❌ เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง Emoji:', err);
-        }
-    });
 
         const rest = new REST({ version: '10' }).setToken(Token);
 
         try {
-            // ลงทะเบียนแบบระบุ Guild ID เพื่อให้คำสั่งโผล่ในดิสคอร์ดทันที
+            // ลงทะเบียนแบบ Global เพื่อหลบปัญหา Missing Access (403)
             await rest.put(
-                Routes.applicationGuildCommands(ClientIds, GuildId),
+                Routes.applicationCommands(ClientIds),
                 { body: commands }
             );
-            console.log('✅ ลงทะเบียนคำสั่ง Emoji สำเร็จ!');
+            console.log('✅ ลงทะเบียนคำสั่ง Emoji แบบ Global สำเร็จ!');
         } catch (err) {
             console.error('❌ เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง Emoji:', err);
         }
