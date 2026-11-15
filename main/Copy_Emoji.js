@@ -29,8 +29,7 @@ module.exports = (client) => {
             new SlashCommandBuilder()
                 .setName('clear_emoji')
                 .setDescription('[ ⛔ คำสั่งล้างอิโมจิทั้งหมด ]')
-                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions)
-                .toJSON(),
+                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions),
             new SlashCommandBuilder()
                 .setName('add_emoji')
                 .setDescription('[ 🌵 คำสั่งเพิ่มอิโมจิ ]')
@@ -39,17 +38,28 @@ module.exports = (client) => {
                         .setDescription('[ 📂 โปรดอัพโหลดไฟล์นามสกุล .ZIP ]')
                         .setRequired(true)
                 )
-                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions)
-                .toJSON(),
+                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions),
             new SlashCommandBuilder()
                 .setName('check_emoji')
-                .setDescription('[ 💬 เช็คอิโมจิทั้งหมดในเซิร์ฟเวอร์ ]')
-                .toJSON(),
+                .setDescription('[ 💬 เช็คอิโมจิทั้งหมดในเซิร์ฟเวอร์ ]'),
             new SlashCommandBuilder()
                 .setName('copy_emoji')
                 .setDescription('[ 🍀 ก็อปปี้อิโมจิจากเซิร์ฟ ]')
-                .toJSON()
         ];
+
+        const GuildId = "1109833313549570169"; // ไอดีเซิร์ฟเวอร์ของมึง
+
+        try {
+            const guild = client.guilds.cache.get(GuildId) || await client.guilds.fetch(GuildId);
+            if (guild) {
+                // ใช้คำสั่งผ่านตัวบอทในเซิร์ฟเวอร์โดยตรง หลบปัญหา Missing Access
+                await guild.commands.set(commands);
+                console.log('✅ ลงทะเบียนคำสั่ง Emoji สำเร็จ!');
+            }
+        } catch (err) {
+            console.error('❌ เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง Emoji:', err);
+        }
+    });
 
         const rest = new REST({ version: '10' }).setToken(Token);
 
