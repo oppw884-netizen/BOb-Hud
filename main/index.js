@@ -7,7 +7,9 @@ const registerHelp = require('./help');
 const registerAuto_QUEST = require('./Auto_QUEST');
 const registerCopy_Emoji = require('./Copy_Emoji');
 const registerxo = require('./xo');
-const registerannounce = require('./announce')
+const registerannounce = require('./announce');
+const registertranslatorbot = raquire('./translatorbot');
+
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
     console.error('ไม่พบ DISCORD_TOKEN — คัดลอก .env.example เป็น .env แล้วใส่โทเคนบอทก่อน');
@@ -115,6 +117,7 @@ registerAuto_QUEST(client);
 registerCopy_Emoji(client);
 registerxo(client);
 registerannounce(client);
+registertranslatorbot(client);
 
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
