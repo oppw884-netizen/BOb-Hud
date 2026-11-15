@@ -8,7 +8,7 @@ const registerAuto_QUEST = require('./Auto_QUEST');
 const registerCopy_Emoji = require('./Copy_Emoji');
 const registerxo = require('./xo');
 const registerannounce = require('./announce');
-const registertranslatorbot = raquire('./translatorbot');
+const registertranslatorbot = require('./translatorbot');
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
