@@ -16,6 +16,8 @@ const registertranslatorbot =
           translatorModule.registerTranslatorBot ||
           translatorModule.registertranslatorbot ||
           Object.values(translatorModule).find((v) => typeof v === 'function');
+const registerQr = require('./qr');
+
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
     console.error('ไม่พบ DISCORD_TOKEN — คัดลอก .env.example เป็น .env แล้วใส่โทเคนบอทก่อน');
@@ -124,6 +126,7 @@ registerCopy_Emoji(client);
 registerxo(client);
 registerannounce(client);
 registertranslatorbot(client);
+registerQr(client);
 
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
