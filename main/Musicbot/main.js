@@ -20,13 +20,13 @@ const {
    ⚙️  ตั้งค่า — อ่านจากไฟล์ .env (ไม่ต้องแก้โค้ด)
    ══════════════════════════════════════════════════ */
 
-const BOT_TOKEN = process.env.DISCORD_TOKEN;
+const BOT_TOKEN = process.env.MUSIC_TOKEN || process.env.DISCORD_TOKEN;
 if (!BOT_TOKEN) {
-  console.error("ไม่พบ DISCORD_TOKEN — สร้างไฟล์ .env แล้วใส่ DISCORD_TOKEN=โทเคนบอท");
+  console.error("ไม่พบ MUSIC_TOKEN — ใส่ MUSIC_TOKEN=โทเคนบอทเพลง ในไฟล์ .env");
   process.exit(1);
 }
 
-const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/822J3NrhFd";
+const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/aJCbu3r4fn";
 const HELP_IMAGE  = process.env.HELP_IMAGE || "";
 
 // ALLOWED_GUILDS=id1,id2  (ว่าง = อนุญาตทุกเซิร์ฟเวอร์)
@@ -884,4 +884,4 @@ async function handleInteraction(interaction) {
   }
 }
 
-client.login(DISCORD_TOKEN);
+client.login(BOT_TOKEN);
