@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const { Client, GatewayIntentBits, ActivityType, EmbedBuilder, Events } = require('discord.js');
 const registerRoblox = require('./roblox');
-const registerVoice = require('./Join_Voice');
+// const registerVoice = require('./Join_Voice');
 const registerAuto_QUEST = require('./Auto_QUEST');
 const registerCopy_Emoji = require('./Copy_Emoji');
 const registerxo = require('./xo');
@@ -121,7 +121,7 @@ client.on(Events.MessageCreate, async (message) => {
 
 // ฟีเจอร์เสริม (ใช้ client ตัวเดียวกัน ไม่ต้อง login ซ้ำ)
 registerRoblox(client);
-registerVoice(client);
+// registerVoice(client);
 registerHelp(client);
 registerAuto_QUEST(client);
 registerCopy_Emoji(client);
