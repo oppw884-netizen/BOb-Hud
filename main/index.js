@@ -9,6 +9,8 @@ const registerCopy_Emoji = require('./Copy_Emoji');
 const registerxo = require('./xo');
 const registerannounce = require('./announce');
 const translatorModule = require('./translatorbot');
+const Musicbot = require('./Musicbot/main.js');
+
 const registertranslatorbot =
     typeof translatorModule === 'function'
         ? translatorModule
@@ -127,6 +129,7 @@ registerxo(client);
 registerannounce(client);
 registertranslatorbot(client);
 registerQr(client);
+Musicbot(client);
 
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
