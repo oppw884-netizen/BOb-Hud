@@ -15,7 +15,6 @@ const {
   startTimes, botVcIds, previousTracks, loopModes,
   volumeLevels, volumeSetBy,
 } = require("./guildState");
-const buildHelp = require("./help");
 
 /* ══════════════════════════════════════════════════
    ⚙️  ตั้งค่า — อ่านจากไฟล์ .env (ไม่ต้องแก้โค้ด)
@@ -27,8 +26,7 @@ if (!BOT_TOKEN) {
   return; // ออกจากโมดูลนี้เฉยๆ ไม่กระทบบอทหลักที่โหลดมันอยู่
 }
 
-const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/822J3NrhFd";
-const HELP_IMAGE  = process.env.HELP_IMAGE || "";
+const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/aJCbu3r4fn";
 
 // ALLOWED_GUILDS=id1,id2  (ว่าง = อนุญาตทุกเซิร์ฟเวอร์)
 const ALLOWED_GUILDS = new Set(
@@ -346,13 +344,10 @@ async function playNext(gid) {
   }
 }
 
-/* ─── ลงทะเบียน slash commands (เก็บ ID ไว้ทำลิงก์คลิกได้ใน /help) ─── */
-const cmdIds = {};
-const cm = (n) => (cmdIds[n] ? `</${n}:${cmdIds[n]}>` : `\`/${n}\``);
-
+/* ─── ลงทะเบียน slash commands ─── */
 async function register() {
   const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
-  const res = await rest.put(Routes.applicationCommands(client.application.id), {
+  await rest.put(Routes.applicationCommands(client.application.id), {
     body: [
       new SlashCommandBuilder()
         .setName("play").setDescription("[⭐️] เปิดเพลง / เพิ่มเพลงเข้าคิว")
@@ -368,7 +363,6 @@ async function register() {
       new SlashCommandBuilder().setName("queue").setDescription("[⭐️] แสดงคิวเพลงทั้งหมด").toJSON(),
       new SlashCommandBuilder().setName("nowplaying").setDescription("[⭐️] ดูเพลงที่กำลังเล่นอยู่").toJSON(),
       new SlashCommandBuilder().setName("previous").setDescription("[⭐️] เล่นเพลงก่อนหน้านี้").toJSON(),
-      new SlashCommandBuilder().setName("help").setDescription("[⭐️] คำสั่งช่วยเหลือ").toJSON(),
       new SlashCommandBuilder()
         .setName("loop").setDescription("[⭐️] วนลูปเพลง")
         .addStringOption(o => o.setName("type").setDescription("เลือกใช้งานวนลูป").setRequired(true)
@@ -380,7 +374,6 @@ async function register() {
         .toJSON(),
     ],
   });
-  for (const c of res) cmdIds[c.name] = c.id;
   console.log("[Bot] slash commands registered");
 }
 
@@ -724,11 +717,6 @@ async function handleInteraction(interaction) {
           .setRequired(true).setMinLength(1).setMaxLength(3)
       )
     ));
-  }
-
-  /* ════ /help ════ (โค้ดอยู่ที่ help.js) ════ */
-  if (name === "help") {
-    return interaction.reply(buildHelp({ cm, supportBtn, helpImage: HELP_IMAGE }));
   }
 
   /* ════ /loop ════ */
