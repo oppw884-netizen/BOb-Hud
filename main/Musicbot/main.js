@@ -852,4 +852,4 @@ async function handleInteraction(interaction) {
   }
 }
 
-client.login(DISCORD_TOKEN);
+client.login(BOT_TOKEN);
