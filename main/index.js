@@ -3,13 +3,13 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, ActivityType, EmbedBuilder, Events } = require('discord.js');
 const registerRoblox = require('./roblox');
 const registerVoice = require('./Join_Voice');
-const registerHelp = require('./help');
 const registerAuto_QUEST = require('./Auto_QUEST');
 const registerCopy_Emoji = require('./Copy_Emoji');
 const registerxo = require('./xo');
 const registerannounce = require('./announce');
 const translatorModule = require('./translatorbot');
 const Musicbot = require('./Musicbot/main.js');
+const Help = require('./help/main.js');
 
 const registertranslatorbot =
     typeof translatorModule === 'function'
@@ -130,7 +130,7 @@ registerannounce(client);
 registertranslatorbot(client);
 registerQr(client);
 Musicbot(client);
-
+Help(client);
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
 
