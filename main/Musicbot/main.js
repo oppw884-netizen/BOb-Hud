@@ -16,15 +16,11 @@ const {
   volumeLevels, volumeSetBy,
 } = require("./guildState");
 
+module.exports = function registerMusic(client) {
+
 /* ══════════════════════════════════════════════════
    ⚙️  ตั้งค่า — อ่านจากไฟล์ .env (ไม่ต้องแก้โค้ด)
    ══════════════════════════════════════════════════ */
-
-const BOT_TOKEN = process.env.MUSIC_TOKEN || process.env.DISCORD_TOKEN;
-if (!BOT_TOKEN) {
-  console.warn("[Musicbot] ไม่พบ MUSIC_TOKEN — ข้ามการเปิดบอทเพลง (ใส่ MUSIC_TOKEN=โทเคนบอทเพลง ในไฟล์ .env)");
-  return; // ออกจากโมดูลนี้เฉยๆ ไม่กระทบบอทหลักที่โหลดมันอยู่
-}
 
 const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/aJCbu3r4fn";
 
@@ -52,7 +48,6 @@ if (process.env.LAVALINK_NODES) {
 
 /* ══════════════════════════════════════════════════ */
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 const shoukaku = new Shoukaku(new Connectors.DiscordJS(client), LavalinkNodes, {
   resume: true,
   resumeTimeout: 60,
@@ -65,11 +60,6 @@ shoukaku.on("error",        (n, e) => console.error(`[Lavalink] ${n}:`, e?.messa
 shoukaku.on("ready",        (n)    => console.log(`[Lavalink] ${n} ready`));
 shoukaku.on("disconnect",   (n)    => console.warn(`[Lavalink] ${n} disconnected — reconnecting...`));
 shoukaku.on("reconnecting", (n)    => console.log(`[Lavalink] ${n} reconnecting...`));
-
-/* ─── กันบอทล้มเพราะ error ที่ไม่ได้ดักไว้ (โฮสต์จะไม่รีสตาร์ทให้ถ้าล้มถี่) ─── */
-process.on("unhandledRejection", (e) => console.error("[Unhandled rejection]", e));
-process.on("uncaughtException",  (e) => console.error("[Uncaught exception]", e));
-client.on("error", (e) => console.error("[Discord client]", e));
 
 /* ─── helpers ─── */
 const supportBtn = () => new ButtonBuilder().setURL(SUPPORT_URL).setLabel("Discord Support").setStyle(ButtonStyle.Link);
@@ -346,9 +336,7 @@ async function playNext(gid) {
 
 /* ─── ลงทะเบียน slash commands ─── */
 async function register() {
-  const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
-  await rest.put(Routes.applicationCommands(client.application.id), {
-    body: [
+  const defs = [
       new SlashCommandBuilder()
         .setName("play").setDescription("[⭐️] เปิดเพลง / เพิ่มเพลงเข้าคิว")
         .addStringOption(o => o.setName("query").setDescription("ลิ้งหรือชื่อเพลง").setRequired(true))
@@ -372,26 +360,16 @@ async function register() {
             { name: "Loop none - ปิดใช้งานวนลูป",             value: "none"  },
           ))
         .toJSON(),
-    ],
-  });
-  console.log("[Bot] slash commands registered");
-}
-
-function updatePresence() {
-  const guildCount = client.guilds.cache.size;
-  const userCount  = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
-  client.user.setPresence({
-    status: "online",
-    activities: [{ name: `${guildCount} เซิร์ฟเวอร์ | ${userCount} คน`, type: ActivityType.Watching }],
-  });
+  ];
+  // create ทีละคำสั่ง (ไม่ใช้ set) เพื่อไม่ลบ /announce, Emoji ฯลฯ ของโมดูลอื่น
+  for (const d of defs) await client.application.commands.create(d);
+  console.log("[Music] slash commands registered");
 }
 
 /* ─── events ─── */
 client.once("clientReady", async () => {
-  console.log(`[Bot] online: ${client.user.tag}`);
+  console.log("[Music] พร้อมใช้งาน");
   try { await register(); } catch (e) { console.error("[Bot] register failed:", e?.message); }
-  updatePresence();
-  setInterval(updatePresence, 5 * 60_000);
 
   // รอ Lavalink พร้อมก่อนเข้าห้องล็อก
   setTimeout(async () => {
@@ -402,9 +380,6 @@ client.once("clientReady", async () => {
     }
   }, 5000);
 });
-
-client.on("guildCreate", () => updatePresence());
-client.on("guildDelete", () => updatePresence());
 
 /* ─── voiceStateUpdate ─── */
 client.on("voiceStateUpdate", async (oldState, newState) => {
@@ -478,6 +453,9 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 async function handleInteraction(interaction) {
+  // ปุ่ม/โมดัลของโมดูลอื่นในบอทเดียวกัน ให้ข้าม
+  if (interaction.isButton() && !interaction.customId.startsWith("music_")) return;
+  if (interaction.isModalSubmit() && interaction.customId !== "volume_modal") return;
 
   /* ════ Modal: ระดับเสียง ════ */
   if (interaction.isModalSubmit() && interaction.customId === "volume_modal") {
@@ -851,5 +829,4 @@ async function handleInteraction(interaction) {
     await interaction.editReply("❌ เกิดข้อผิดพลาด: " + err.message).catch(() => {});
   }
 }
-
-client.login(BOT_TOKEN);
+};
