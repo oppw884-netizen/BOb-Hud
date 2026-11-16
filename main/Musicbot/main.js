@@ -15,6 +15,7 @@ const {
   startTimes, botVcIds, previousTracks, loopModes,
   volumeLevels, volumeSetBy,
 } = require("./guildState");
+const buildHelp = require("./help");
 
 /* ══════════════════════════════════════════════════
    ⚙️  ตั้งค่า — อ่านจากไฟล์ .env (ไม่ต้องแก้โค้ด)
@@ -22,11 +23,11 @@ const {
 
 const BOT_TOKEN = process.env.MUSIC_TOKEN || process.env.DISCORD_TOKEN;
 if (!BOT_TOKEN) {
-  console.error("ไม่พบ MUSIC_TOKEN — ใส่ MUSIC_TOKEN=โทเคนบอทเพลง ในไฟล์ .env");
-  process.exit(1);
+  console.warn("[Musicbot] ไม่พบ MUSIC_TOKEN — ข้ามการเปิดบอทเพลง (ใส่ MUSIC_TOKEN=โทเคนบอทเพลง ในไฟล์ .env)");
+  return; // ออกจากโมดูลนี้เฉยๆ ไม่กระทบบอทหลักที่โหลดมันอยู่
 }
 
-const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/aJCbu3r4fn";
+const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/822J3NrhFd";
 const HELP_IMAGE  = process.env.HELP_IMAGE || "";
 
 // ALLOWED_GUILDS=id1,id2  (ว่าง = อนุญาตทุกเซิร์ฟเวอร์)
@@ -725,30 +726,9 @@ async function handleInteraction(interaction) {
     ));
   }
 
-  /* ════ /help ════ */
+  /* ════ /help ════ (โค้ดอยู่ที่ help.js) ════ */
   if (name === "help") {
-    const sep = new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
-    const gap = () => new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small);
-    const text = (s) => new TextDisplayBuilder().setContent(s);
-
-    const container = new ContainerBuilder().setAccentColor(0x9b59b6)
-      .addTextDisplayComponents(text("# 🎵 Music Bot — คำสั่งทั้งหมด\n-# ⭐️ = คำสั่งหลักที่ใช้งานได้"))
-      .addSeparatorComponents(sep)
-      .addTextDisplayComponents(text(`## 🎧 การเล่นเพลง\n> ${cm("play")} — เปิดเพลงด้วยลิ้งหรือชื่อเพลง\n> ${cm("skip")} — ข้ามเพลงปัจจุบัน\n> ${cm("previous")} — เล่นเพลงก่อนหน้า\n> ${cm("pause")} — หยุดเพลงชั่วคราว\n> ${cm("resume")} — เล่นเพลงต่อ\n> ${cm("leave")} — หยุดเล่นเพลงและออกห้องเสียง`))
-      .addSeparatorComponents(gap())
-      .addTextDisplayComponents(text(`## 📋 คิวเพลง\n> ${cm("queue")} — แสดงรายการเพลงในคิว\n> ${cm("nowplaying")} — ดูเพลงที่กำลังเล่นอยู่\n> ${cm("clear")} — ล้างคิวเพลงทั้งหมด`))
-      .addSeparatorComponents(gap())
-      .addTextDisplayComponents(text(`## 🔁 วนลูป & เสียง\n> ${cm("loop")} — วนลูปเพลง (เพลงนี้ / ทั้งคิว / ปิด)\n> ${cm("volume")} — ปรับระดับเสียงบอท (0–100)`))
-      .addSeparatorComponents(gap())
-      .addTextDisplayComponents(text(`## 🛠️ อื่นๆ\n> ${cm("nodes")} — ตรวจสอบสถานะ Lavalink\n> ${cm("help")} — แสดงคำสั่งทั้งหมด`))
-      .addSeparatorComponents(sep);
-
-    if (HELP_IMAGE) container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(item => item.setURL(HELP_IMAGE)));
-    container
-      .addTextDisplayComponents(text("-# DVE by MC"))
-      .addActionRowComponents(new ActionRowBuilder().addComponents(supportBtn()));
-
-    return interaction.reply({ flags: MessageFlags.IsComponentsV2, components: [container] });
+    return interaction.reply(buildHelp({ cm, supportBtn, helpImage: HELP_IMAGE }));
   }
 
   /* ════ /loop ════ */
@@ -884,4 +864,4 @@ async function handleInteraction(interaction) {
   }
 }
 
-client.login(BOT_TOKEN);
+client.login(DISCORD_TOKEN);
